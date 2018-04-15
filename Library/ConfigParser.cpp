@@ -1999,7 +1999,7 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 
 							std::wstring strParam = std::to_wstring(param + delta);
 							if (GetRainmeter().GetDebug()) LogDebugF(m_Skin, L"Cloning section '%s' to '%s' with param: %s", realSectionName.c_str(), baseSectionName.c_str(), strParam.c_str());
-							CloneSection(realSectionName, baseSectionName, strParam, m_Templates);
+							CloneSection(realSectionName, baseSectionName, strParam, &m_Templates);
 						}
 
 					}
@@ -2118,7 +2118,7 @@ void ConfigParser::ReplaceParam(const std::wstring& strSection, const std::wstri
 ** Clone the given section using the given base section name and the param
 **
 */
-void ConfigParser::CloneSection(const std::wstring& strOriginalSection, const std::wstring& strBaseSectionName, const std::wstring& strParam, const std::list<std::wstring>& m_Templates)
+void ConfigParser::CloneSection(const std::wstring& strOriginalSection, const std::wstring& strBaseSectionName, const std::wstring& strParam, std::list<std::wstring>* m_Templates)
 {
 	std::wstring key;
 	std::wstring strTmp = strOriginalSection + L'~';
@@ -2140,9 +2140,9 @@ void ConfigParser::CloneSection(const std::wstring& strOriginalSection, const st
 		m_Sections.push_back(strDestSection);
 	}
 
-	if (m_Templates.size())
+	if (m_Templates != nullptr && (*m_Templates).size())
 	{
-		ProcessTemplates(strParam, m_Templates);
+		ProcessTemplates(strParam, *m_Templates);
 	}
 
 	ReplaceParam(strDestSection, strParam);
@@ -2153,16 +2153,13 @@ void ConfigParser::CloneSection(const std::wstring& strOriginalSection, const st
 */
 void ConfigParser::ProcessTemplates(const std::wstring& strParam, const std::list<std::wstring>& m_Templates)
 {
-	// could not found other way to give to function CloneSection the empty list
-	std::list<std::wstring> m_Templates2;
-
 	for (auto it = m_Templates.begin(); it != m_Templates.end(); ++it)
 	{
 
 		std::wstring srcSection = L"Template:" + (*it);
 		std::wstring dstSection = (*it);
 
-		CloneSection(srcSection, dstSection, strParam, m_Templates2);
+		CloneSection(srcSection, dstSection, strParam, nullptr);
 
 	}
 }
