@@ -2103,7 +2103,7 @@ void ConfigParser::ReplaceParam(const std::wstring& strSection, const std::wstri
 			std::wstring val = it->second;
 
 			size_t pos = 0;
-			while ((pos = val.find(L"@@@", pos)) != std::wstring::npos)
+			while ((pos = val.find(L"@#@", pos)) != std::wstring::npos)
 			{
 
 				val.replace(pos, 3, strParam);
