@@ -156,7 +156,6 @@ private:
 
 	std::unordered_set<std::wstring> m_FoundSections;
 	std::list<std::wstring> m_ListVariables;
-	std::list<std::wstring>::const_iterator m_SectionInsertPos;
 
 	std::unordered_map<std::wstring, std::wstring> m_BuiltInVariables;
 	std::unordered_map<std::wstring, std::wstring> m_Variables;
