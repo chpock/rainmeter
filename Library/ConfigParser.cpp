@@ -81,7 +81,6 @@ void ConfigParser::Initialize(const std::wstring& filename, Skin* skin, LPCTSTR 
 	m_LastValueDefined = false;
 
 	m_CurrentSection = nullptr;
-	m_SectionInsertPos = m_Sections.end();
 
 	// Set the built-in variables. Do this before the ini file is read so that the paths can be used with @include
 	SetBuiltInVariables(filename, resourcePath, skin);
@@ -95,7 +94,6 @@ void ConfigParser::Initialize(const std::wstring& filename, Skin* skin, LPCTSTR 
 	// Clear and minimize
 	m_FoundSections.clear();
 	m_ListVariables.clear();
-	m_SectionInsertPos = m_Sections.end();
 }
 
 void ConfigParser::SetBuiltInVariables(const std::wstring& filename, const std::wstring* resourcePath, Skin* skin)
@@ -1838,7 +1836,6 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 		const WCHAR* sectionName = (*it).c_str();
 		bool isVariables = (_wcsicmp(sectionName, L"Variables") == 0);
 		bool isMetadata = (skinSection == nullptr && !isVariables && _wcsicmp(sectionName, L"Metadata") == 0);
-		bool resetInsertPos = true;
 
 		// Read all "key=value" from the section
 		do
@@ -1896,7 +1893,7 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 
 		if (m_FoundSections.insert(realSectionName).second)
 		{
-			m_Sections.insert(m_SectionInsertPos, realSectionName);
+			m_Sections.push_back(realSectionName);
 		}
 
 		std::list<std::wstring> m_Templates;
@@ -1944,30 +1941,6 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 									value.insert(0, PathUtil::GetFolderFromFilePath(iniFile));
 								}
 
-								if (resetInsertPos)
-								{
-									auto jt = it;
-									if (++jt == sections.end())  // Special case: @include was used in the last section of the current file
-									{
-										// Set the insertion place to the last
-										m_SectionInsertPos = m_Sections.end();
-										resetInsertPos = false;
-									}
-									else
-									{
-										// Find the appropriate insertion place
-										for (jt = m_Sections.cbegin(); jt != m_Sections.cend(); ++jt)
-										{
-											if (_wcsicmp((*jt).c_str(), sectionName) == 0)
-											{
-												m_SectionInsertPos = ++jt;
-												resetInsertPos = false;
-												break;
-											}
-										}
-									}
-								}
-
 								ReadIniFile(value, skinSection, depth + 1);
 							}
 						}
@@ -2002,16 +1975,19 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 		// clone the section
 		if (!lastSectionParam.empty()) {
 
-			errno = 0;
-			int intFirstParam = wcstoul(firstSectionParam.c_str(), nullptr, 10);
 
-			if (errno != ERANGE && intFirstParam != 0)
+			WCHAR* pch = nullptr;
+			errno = 0;
+			int intFirstParam = wcstoul(firstSectionParam.c_str(), &pch, 10);
+
+			if (errno != ERANGE && pch != nullptr && *pch == L'\0')
 			{
 
+				pch = nullptr;
 				errno = 0;
-				int intLastParam = wcstoul(lastSectionParam.c_str(), nullptr, 10);
+				int intLastParam = wcstoul(lastSectionParam.c_str(), &pch, 10);
 
-				if (errno != ERANGE && intLastParam != 0)
+				if (errno != ERANGE && pch != nullptr && *pch == L'\0')
 				{
 
 					for (int param = intFirstParam + 1; param <= intLastParam; ++param)
@@ -2025,14 +2001,14 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 				}
 				else
 				{
-					LogWarningF(m_Skin, L"The last param in section '%s' is not integer: ", sectionName, lastSectionParam.c_str());
+					LogWarningF(m_Skin, L"The last param in section '%s' is not integer: %s", sectionName, lastSectionParam.c_str());
 				}
 
 
 			}
 			else
 			{
-				LogWarningF(m_Skin, L"The first param in section '%s' is not integer: ", sectionName, firstSectionParam.c_str());
+				LogWarningF(m_Skin, L"The first param in section '%s' is not integer: %s", sectionName, firstSectionParam.c_str());
 			}
 		}
 
@@ -2157,7 +2133,7 @@ void ConfigParser::CloneSection(const std::wstring& strOriginalSection, const st
 
 	if (m_FoundSections.insert(strDestSection).second)
 	{
-		m_Sections.insert(m_SectionInsertPos, strDestSection);
+		m_Sections.push_back(strDestSection);
 	}
 
 	if (m_Templates.size())
