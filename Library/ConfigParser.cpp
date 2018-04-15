@@ -1972,6 +1972,7 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 			}
 		}
 
+
 		// process templates for the first section
 		if (!firstSectionParam.empty() && m_Templates.size())
 		{
@@ -1981,25 +1982,26 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 		// clone the section
 		if (!lastSectionParam.empty()) {
 
-
 			WCHAR* pch = nullptr;
 			errno = 0;
-			int intFirstParam = wcstoul(firstSectionParam.c_str(), &pch, 10);
+			unsigned long intFirstParam = wcstoul(firstSectionParam.c_str(), &pch, 10);
 
 			if (errno != ERANGE && pch != nullptr && *pch == L'\0')
 			{
 
 				pch = nullptr;
 				errno = 0;
-				int intLastParam = wcstoul(lastSectionParam.c_str(), &pch, 10);
+				unsigned long intLastParam = wcstoul(lastSectionParam.c_str(), &pch, 10);
 
 				if (errno != ERANGE && pch != nullptr && *pch == L'\0')
 				{
 
-					for (int param = intFirstParam + 1; param <= intLastParam; ++param)
+					int delta = (intFirstParam > intLastParam) ? -1 : 1;
+
+					for (unsigned long param = intFirstParam; param != intLastParam; param += delta)
 					{
 
-						std::wstring strParam = std::to_wstring(param);
+						std::wstring strParam = std::to_wstring(param + delta);
 						if (GetRainmeter().GetDebug()) LogDebugF(m_Skin, L"Cloning section '%s' to '%s' with param: %s", realSectionName.c_str(), baseSectionName.c_str(), strParam.c_str());
 						CloneSection(realSectionName, baseSectionName, strParam, m_Templates);
 					}
@@ -2016,6 +2018,7 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 			{
 				LogWarningF(m_Skin, L"The first param in section '%s' is not integer: %s", sectionName, firstSectionParam.c_str());
 			}
+
 		}
 
 
