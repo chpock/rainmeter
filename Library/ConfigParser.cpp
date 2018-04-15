@@ -1993,7 +1993,6 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 			}
 		}
 
-
 		// process templates for the first section
 		if (!firstSectionParam.empty() && m_Templates.size())
 		{
@@ -2026,14 +2025,14 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 				}
 				else
 				{
-					if (GetRainmeter().GetDebug()) LogDebugF(m_Skin, L"Error: the last param in section '%s' is not integer: ", sectionName, lastSectionParam.c_str());
+					LogWarningF(m_Skin, L"The last param in section '%s' is not integer: ", sectionName, lastSectionParam.c_str());
 				}
 
 
 			}
 			else
 			{
-				if (GetRainmeter().GetDebug()) LogDebugF(m_Skin, L"Error: the first param in section '%s' is not integer: ", sectionName, firstSectionParam.c_str());
+				LogWarningF(m_Skin, L"The first param in section '%s' is not integer: ", sectionName, firstSectionParam.c_str());
 			}
 		}
 
@@ -2134,7 +2133,6 @@ void ConfigParser::ReplaceParam(const std::wstring& strSection, const std::wstri
 
 		}
 	}
-
 }
 /*
 ** Clone the given section using the given base section name and the param
@@ -2175,7 +2173,6 @@ void ConfigParser::CloneSection(const std::wstring& strOriginalSection, const st
 */
 void ConfigParser::ProcessTemplates(const std::wstring& strParam, const std::list<std::wstring>& m_Templates)
 {
-
 	// could not found other way to give to function CloneSection the empty list
 	std::list<std::wstring> m_Templates2;
 
@@ -2188,5 +2185,4 @@ void ConfigParser::ProcessTemplates(const std::wstring& strParam, const std::lis
 		CloneSection(srcSection, dstSection, strParam, m_Templates2);
 
 	}
-
 }
