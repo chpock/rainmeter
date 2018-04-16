@@ -1065,8 +1065,7 @@ const std::wstring& ConfigParser::ReadString(LPCTSTR section, LPCTSTR key, LPCTS
 		bool foundStyleValue = false;
 
 		// If the template is defined read the value from there.
-		std::vector<std::wstring>::const_reverse_iterator iter = m_StyleTemplate.rbegin();
-		for ( ; iter != m_StyleTemplate.rend(); ++iter)
+		for (auto iter = m_StyleTemplate.begin(); iter != m_StyleTemplate.end(); ++iter)
 		{
 			const std::wstring& strStyleValue = GetValue((*iter), strKey, strDefault);
 
@@ -2175,7 +2174,7 @@ void ConfigParser::ProcessTemplates(const std::wstring& strParam, const std::lis
 ** Adds style templates from the given string.
 **
 */
-void ConfigParser::SetStyleTemplate(const std::wstring& strStyle, int depth)
+void ConfigParser::AddStyleTemplate(const std::wstring& strStyle, int depth)
 {
 	// the maximum nesting of the MeterStyle values
 	if (depth > 19)
@@ -2186,15 +2185,15 @@ void ConfigParser::SetStyleTemplate(const std::wstring& strStyle, int depth)
 
 	std::vector<std::wstring> styles = Tokenize(strStyle, L"|");
 
-	for (auto it = styles.crbegin(); it != styles.crend(); ++it)
+	for (auto it = styles.rbegin(); it != styles.rend(); ++it)
 	{
 
-		std::wstring strTmp = StrToUpper(*it);
+		StrToUpperC(*it);
 		bool found = false;
 
 		for (auto it2 = m_StyleTemplate.cbegin(); it2 != m_StyleTemplate.cend(); ++it2)
 		{
-			if (strTmp.compare(*it2) == 0)
+			if ((*it).compare(*it2) == 0)
 			{
 				found = true;
 				break;
@@ -2204,7 +2203,7 @@ void ConfigParser::SetStyleTemplate(const std::wstring& strStyle, int depth)
 		// don't allow duplicate section in the m_StyleTemplate list
 		if (!found)
 		{
-			m_StyleTemplate.push_back(strTmp);
+			m_StyleTemplate.push_back(*it);
 
 			// ReadString() can't be used here because it will go through
 			// all the styles sections added earlier
@@ -2212,7 +2211,7 @@ void ConfigParser::SetStyleTemplate(const std::wstring& strStyle, int depth)
 
 			if (!parentStyles.empty())
 			{
-				SetStyleTemplate(parentStyles, depth + 1);
+				AddStyleTemplate(parentStyles, depth + 1);
 			}
 		}
 
