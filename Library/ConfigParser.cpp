@@ -81,7 +81,6 @@ void ConfigParser::Initialize(const std::wstring& filename, Skin* skin, LPCTSTR 
 	m_LastValueDefined = false;
 
 	m_CurrentSection = nullptr;
-	m_SectionInsertPos = m_Sections.end();
 
 	// Set the built-in variables. Do this before the ini file is read so that the paths can be used with @include
 	SetBuiltInVariables(filename, resourcePath, skin);
@@ -95,7 +94,6 @@ void ConfigParser::Initialize(const std::wstring& filename, Skin* skin, LPCTSTR 
 	// Clear and minimize
 	m_FoundSections.clear();
 	m_ListVariables.clear();
-	m_SectionInsertPos = m_Sections.end();
 }
 
 void ConfigParser::SetBuiltInVariables(const std::wstring& filename, const std::wstring* resourcePath, Skin* skin)
@@ -1810,10 +1808,6 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 				StrToUpperC(key.assign(value));
 				if (unique.insert(key).second)
 				{
-					if (m_FoundSections.insert(key).second)
-					{
-						m_Sections.insert(m_SectionInsertPos, value);
-					}
 					sections.push_back(value);
 				}
 				pos += value.size() + 1;
@@ -1848,7 +1842,6 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 		const WCHAR* sectionName = (*it).c_str();
 		bool isVariables = (_wcsicmp(sectionName, L"Variables") == 0);
 		bool isMetadata = (skinSection == nullptr && !isVariables && _wcsicmp(sectionName, L"Metadata") == 0);
-		bool resetInsertPos = true;
 
 		// Read all "key=value" from the section
 		do
@@ -1866,6 +1859,50 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 			items = new WCHAR[itemsSize];
 		}
 		while (true);
+
+		std::wstring realSectionName, baseSectionName, firstSectionParam, lastSectionParam;
+
+		realSectionName.assign(sectionName);
+		baseSectionName.clear();
+		firstSectionParam.clear();
+		lastSectionParam.clear();
+
+		// ignoring templates
+		if (_wcsnicmp(sectionName, L"Template:", 9) != 0)
+		{
+
+			const size_t sepPos = realSectionName.find_first_of(L':');
+
+			// section has no params
+			if (sepPos != std::wstring::npos)
+			{
+
+				baseSectionName = realSectionName.substr(0, sepPos);
+				firstSectionParam = realSectionName.substr(sepPos + 1);
+
+				const size_t sepPos2 = firstSectionParam.find_first_of(L':');
+
+				// section has second param
+				if (sepPos2 != std::wstring::npos)
+				{
+
+					lastSectionParam = firstSectionParam.substr(sepPos2 + 1);
+					firstSectionParam.erase(sepPos2, std::wstring::npos);
+
+				}
+
+				realSectionName = baseSectionName + firstSectionParam;
+
+			}
+
+		}
+
+		if (m_FoundSections.insert(realSectionName).second)
+		{
+			m_Sections.push_back(realSectionName);
+		}
+
+		std::list<std::wstring> m_Templates;
 
 		pos = items;
 		while (pos < epos)
@@ -1891,41 +1928,23 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 							++sep;
 						}
 
+						value.assign(sep, clen);
+
+						if (wcsncmp(key.c_str(), L"@TEMPLATE", 9) == 0)
+						{
+							m_Templates.push_back(value);
+						}
+
 						if (wcsncmp(key.c_str(), L"@INCLUDE", 8) == 0)
 						{
 							if (clen > 0)
 							{
-								value.assign(sep, clen);
 								ReadVariables();
 								ReplaceVariables(value, true);
 								if (!PathUtil::IsAbsolute(value))
 								{
 									// Relative to the ini folder
 									value.insert(0, PathUtil::GetFolderFromFilePath(iniFile));
-								}
-
-								if (resetInsertPos)
-								{
-									auto jt = it;
-									if (++jt == sections.end())  // Special case: @include was used in the last section of the current file
-									{
-										// Set the insertion place to the last
-										m_SectionInsertPos = m_Sections.end();
-										resetInsertPos = false;
-									}
-									else
-									{
-										// Find the appropriate insertion place
-										for (jt = m_Sections.cbegin(); jt != m_Sections.cend(); ++jt)
-										{
-											if (_wcsicmp((*jt).c_str(), sectionName) == 0)
-											{
-												m_SectionInsertPos = ++jt;
-												resetInsertPos = false;
-												break;
-											}
-										}
-									}
 								}
 
 								ReadIniFile(value, skinSection, depth + 1);
@@ -1935,8 +1954,7 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 						{
 							if (!isMetadata)  // Uncache Metadata's key-value pair in the skin
 							{
-								value.assign(sep, clen);
-								SetValue((*it), key, value);
+								SetValue(realSectionName, key, value);
 
 								if (isVariables)
 								{
@@ -1953,6 +1971,63 @@ void ConfigParser::ReadIniFile(const std::wstring& iniFile, LPCTSTR skinSection,
 				++pos;
 			}
 		}
+
+		if (!firstSectionParam.empty())
+		{
+
+			// process templates for the first section
+			if (m_Templates.size())
+			{
+				ProcessTemplates(firstSectionParam, m_Templates);
+			}
+
+			// clone the section
+			if (!lastSectionParam.empty()) {
+
+				WCHAR* pch = nullptr;
+				errno = 0;
+				unsigned long intFirstParam = wcstoul(firstSectionParam.c_str(), &pch, 10);
+
+				if (errno != ERANGE && pch != nullptr && *pch == L'\0')
+				{
+
+					pch = nullptr;
+					errno = 0;
+					unsigned long intLastParam = wcstoul(lastSectionParam.c_str(), &pch, 10);
+
+					if (errno != ERANGE && pch != nullptr && *pch == L'\0')
+					{
+
+						int delta = (intFirstParam > intLastParam) ? -1 : 1;
+
+						for (unsigned long param = intFirstParam; param != intLastParam; param += delta)
+						{
+
+							std::wstring strParam = std::to_wstring(param + delta);
+							if (GetRainmeter().GetDebug()) LogDebugF(m_Skin, L"Cloning section '%s' to '%s' with param: %s", realSectionName.c_str(), baseSectionName.c_str(), strParam.c_str());
+							CloneSection(realSectionName, baseSectionName, strParam, &m_Templates);
+						}
+
+					}
+					else
+					{
+						LogWarningF(m_Skin, L"The last param in section '%s' is not integer: %s", sectionName, lastSectionParam.c_str());
+					}
+
+
+				}
+				else
+				{
+					LogWarningF(m_Skin, L"The first param in section '%s' is not integer: %s", sectionName, firstSectionParam.c_str());
+				}
+
+			}
+
+			// replace the param in values for the original section
+			ReplaceParam(realSectionName, firstSectionParam);
+
+		}
+
 	}
 
 	delete [] items;
@@ -1994,7 +2069,6 @@ void ConfigParser::DeleteValue(const std::wstring& strSection, const std::wstrin
 		m_Values.erase(iter);
 	}
 }
-
 /*
 ** Returns the value for the key under the given section.
 **
@@ -2009,6 +2083,92 @@ const std::wstring& ConfigParser::GetValue(const std::wstring& strSection, const
 
 	std::unordered_map<std::wstring, std::wstring>::const_iterator iter = m_Values.find(StrToUpperC(strTmp));
 	return (iter != m_Values.end()) ? (*iter).second : strDefault;
+}
+
+/*
+** Replace param for the given section.
+**
+*/
+void ConfigParser::ReplaceParam(const std::wstring& strSection, const std::wstring& strParam)
+{
+	std::wstring strTmp = strSection + L'~';
+	StrToUpperC(strTmp);
+
+	for (auto it = m_Values.begin(); it != m_Values.end(); ++it)
+	{
+		if (it->first.compare(0, strTmp.size(), strTmp) == 0)
+		{
+
+			bool changed = false;
+
+			std::wstring val = it->second;
+
+			size_t pos = 0;
+			while ((pos = val.find(L"@#@", pos)) != std::wstring::npos)
+			{
+
+				val.replace(pos, 3, strParam);
+				pos += strParam.size();
+				changed = true;
+
+			}
+
+			if (changed)
+			{
+				m_Values[it->first] = val;
+			}
+
+		}
+	}
+}
+/*
+** Clone the given section using the given base section name and the param
+**
+*/
+void ConfigParser::CloneSection(const std::wstring& strOriginalSection, const std::wstring& strBaseSectionName, const std::wstring& strParam, std::list<std::wstring>* m_Templates)
+{
+	std::wstring key;
+	std::wstring strTmp = strOriginalSection + L'~';
+	StrToUpperC(strTmp);
+
+	std::wstring strDestSection = strBaseSectionName + strParam;
+
+	for (auto it = m_Values.begin(); it != m_Values.end(); ++it)
+	{
+		if (it->first.compare(0, strTmp.size(), strTmp) == 0)
+		{
+			key = it->first.substr(strTmp.size());
+			SetValue(strDestSection, key, it->second);
+		}
+	}
+
+	if (m_FoundSections.insert(strDestSection).second)
+	{
+		m_Sections.push_back(strDestSection);
+	}
+
+	if (m_Templates != nullptr && (*m_Templates).size())
+	{
+		ProcessTemplates(strParam, *m_Templates);
+	}
+
+	ReplaceParam(strDestSection, strParam);
+}
+/*
+** Process templates in the given section
+**
+*/
+void ConfigParser::ProcessTemplates(const std::wstring& strParam, const std::list<std::wstring>& m_Templates)
+{
+	for (auto it = m_Templates.begin(); it != m_Templates.end(); ++it)
+	{
+
+		std::wstring srcSection = L"Template:" + (*it);
+		std::wstring dstSection = (*it);
+
+		CloneSection(srcSection, dstSection, strParam, nullptr);
+
+	}
 }
 
 /*
