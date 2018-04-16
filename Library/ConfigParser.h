@@ -68,7 +68,7 @@ public:
 	void SetValue(const std::wstring& strSection, const std::wstring& strKey, const std::wstring& strValue);
 	void DeleteValue(const std::wstring& strSection, const std::wstring& strKey);
 
-	void SetStyleTemplate(const std::wstring& strStyle) { static const std::wstring delim(1, L'|'); Tokenize(strStyle, delim).swap(m_StyleTemplate); }
+	void SetStyleTemplate(const std::wstring& strStyle) { ClearStyleTemplate(); AddStyleTemplate(strStyle, 0); }
 	void ClearStyleTemplate() { m_StyleTemplate.clear(); }
 
 	bool GetLastReplaced() { return m_LastReplaced; }
@@ -126,6 +126,8 @@ private:
 	void SetAutoSelectedMonitorVariables(Skin* skin);
 
 	bool GetSectionVariable(std::wstring& strVariable, std::wstring& strValue);
+
+	void AddStyleTemplate(const std::wstring& strStyle, int depth);
 
 	static void SetVariable(std::unordered_map<std::wstring, std::wstring>& variables, const std::wstring& strVariable, const std::wstring& strValue);
 	static void SetVariable(std::unordered_map<std::wstring, std::wstring>& variables, const WCHAR* strVariable, const WCHAR* strValue);

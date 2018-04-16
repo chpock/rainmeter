@@ -1065,8 +1065,7 @@ const std::wstring& ConfigParser::ReadString(LPCTSTR section, LPCTSTR key, LPCTS
 		bool foundStyleValue = false;
 
 		// If the template is defined read the value from there.
-		std::vector<std::wstring>::const_reverse_iterator iter = m_StyleTemplate.rbegin();
-		for ( ; iter != m_StyleTemplate.rend(); ++iter)
+		for (auto iter = m_StyleTemplate.begin(); iter != m_StyleTemplate.end(); ++iter)
 		{
 			const std::wstring& strStyleValue = GetValue((*iter), strKey, strDefault);
 
@@ -2084,6 +2083,7 @@ const std::wstring& ConfigParser::GetValue(const std::wstring& strSection, const
 	std::unordered_map<std::wstring, std::wstring>::const_iterator iter = m_Values.find(StrToUpperC(strTmp));
 	return (iter != m_Values.end()) ? (*iter).second : strDefault;
 }
+
 /*
 ** Replace param for the given section.
 **
@@ -2166,6 +2166,54 @@ void ConfigParser::ProcessTemplates(const std::wstring& strParam, const std::lis
 		std::wstring dstSection = (*it);
 
 		CloneSection(srcSection, dstSection, strParam, nullptr);
+
+	}
+}
+
+/*
+** Adds style templates from the given string.
+**
+*/
+void ConfigParser::AddStyleTemplate(const std::wstring& strStyle, int depth)
+{
+	// the maximum nesting of the MeterStyle values
+	if (depth > 19)
+	{
+		LogErrorF(m_Skin, L"Error: The maximum nesting of the MeterStyle values has been reached.");
+		return;
+	}
+
+	std::vector<std::wstring> styles = Tokenize(strStyle, L"|");
+
+	for (auto it = styles.rbegin(); it != styles.rend(); ++it)
+	{
+
+		StrToUpperC(*it);
+		bool found = false;
+
+		for (auto it2 = m_StyleTemplate.cbegin(); it2 != m_StyleTemplate.cend(); ++it2)
+		{
+			if ((*it).compare(*it2) == 0)
+			{
+				found = true;
+				break;
+			}
+		}
+
+		// don't allow duplicate section in the m_StyleTemplate list
+		if (!found)
+		{
+			m_StyleTemplate.push_back(*it);
+
+			// ReadString() can't be used here because it will go through
+			// all the styles sections added earlier
+			const std::wstring& parentStyles = GetValue((*it).c_str(), L"MeterStyle", L"");
+
+			if (!parentStyles.empty())
+			{
+				AddStyleTemplate(parentStyles, depth + 1);
+			}
+		}
 
 	}
 }
