@@ -428,7 +428,7 @@ bool ConfigParser::GetSectionVariable(std::wstring& strVariable, std::wstring& s
 		WCHAR buffer[128];
 		_snwprintf_s(format, _TRUNCATE, L"%%.%if", decimals);
 		int bufferLen = _snwprintf_s(buffer, _TRUNCATE, format, value);
-			
+
 		if (!decimalsSz)
 		{
 			// Remove trailing zeros if decimal count was not specified.
@@ -439,7 +439,7 @@ bool ConfigParser::GetSectionVariable(std::wstring& strVariable, std::wstring& s
 		strValue.assign(buffer, bufferLen);
 		return true;
 	}
-	
+
 	return false;
 }
 
@@ -813,7 +813,7 @@ bool ConfigParser::ReplaceMeasures(std::wstring& result)
 			start = next;
 		}
 	}
-	
+
 	return replaced;
 }
 
@@ -2009,4 +2009,52 @@ const std::wstring& ConfigParser::GetValue(const std::wstring& strSection, const
 
 	std::unordered_map<std::wstring, std::wstring>::const_iterator iter = m_Values.find(StrToUpperC(strTmp));
 	return (iter != m_Values.end()) ? (*iter).second : strDefault;
+}
+
+/*
+** Adds style templates from the given string.
+**
+*/
+void ConfigParser::SetStyleTemplate(const std::wstring& strStyle, int depth)
+{
+	// the maximum nesting of the MeterStyle values
+	if (depth > 19)
+	{
+		LogErrorF(m_Skin, L"Error: The maximum nesting of the MeterStyle values has been reached.");
+		return;
+	}
+
+	std::vector<std::wstring> styles = Tokenize(strStyle, L"|");
+
+	for (auto it = styles.crbegin(); it != styles.crend(); ++it)
+	{
+
+		std::wstring strTmp = StrToUpper(*it);
+		bool found = false;
+
+		for (auto it2 = m_StyleTemplate.cbegin(); it2 != m_StyleTemplate.cend(); ++it2)
+		{
+			if (strTmp.compare(*it2) == 0)
+			{
+				found = true;
+				break;
+			}
+		}
+
+		// don't allow duplicate section in the m_StyleTemplate list
+		if (!found)
+		{
+			m_StyleTemplate.push_back(strTmp);
+
+			// ReadString() can't be used here because it will go through
+			// all the styles sections added earlier
+			const std::wstring& parentStyles = GetValue((*it).c_str(), L"MeterStyle", L"");
+
+			if (!parentStyles.empty())
+			{
+				SetStyleTemplate(parentStyles, depth + 1);
+			}
+		}
+
+	}
 }
