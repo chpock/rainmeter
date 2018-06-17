@@ -126,7 +126,6 @@ public:
 	void EditSkinFile(const std::wstring& name, const std::wstring& iniFile);
 	void OpenSkinFolder(const std::wstring& name = std::wstring());
 
-	void UpdateStats();
 	void ReadStats();
 	void WriteStats(bool bForce);
 	void ResetStats();
@@ -208,6 +207,7 @@ private:
 	void CreateDataFile();
 	void CreateComponentFolders(bool defaultIniLocation);
 	void TestSettingsFile(bool bDefaultIniLocation);
+	void CheckSettingsFileEncoding(const std::wstring& iniFile, std::wstring* log);
 
 	TrayIcon* m_TrayIcon;
 

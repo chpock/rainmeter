@@ -1714,19 +1714,22 @@ void DialogAbout::TabVersion::Create(HWND owner)
 			28, 26, 300, 9,
 			WS_VISIBLE, 0),
 		CT_LABEL(Id_WinVerLabel, 0,
-			0, 43, 360, 9,
+			0, 43, 570, 9,
 			WS_VISIBLE | SS_ENDELLIPSIS | SS_NOPREFIX, 0),
-		CT_LABEL(Id_PathLabel, 0,
-			0, 56, 360, 9,
+		CT_LINKLABEL(Id_PathLink, 0,
+			0, 56, 570, 9,
 			WS_VISIBLE | SS_ENDELLIPSIS | SS_NOPREFIX, 0),
-		CT_LABEL(Id_IniFileLabel, 0,
-			0, 69, 360, 9,
+		CT_LINKLABEL(Id_SkinPathLink, 0,
+			0, 69, 570, 9,
 			WS_VISIBLE | SS_ENDELLIPSIS | SS_NOPREFIX, 0),
-		CT_LABEL(Id_SkinPathLabel, 0,
-			0, 82, 360, 9,
+		CT_LINKLABEL(Id_SettingsPathLink, 0,
+			0, 82, 570, 9,
+			WS_VISIBLE | SS_ENDELLIPSIS | SS_NOPREFIX, 0),
+		CT_LINKLABEL(Id_IniFileLink, 0,
+			0, 95, 570, 9,
 			WS_VISIBLE | SS_ENDELLIPSIS | SS_NOPREFIX, 0),
 		CT_BUTTON(Id_CopyButton, ID_STR_COPYTOCLIPBOARD,
-			0, 98, buttonWidth + 35, 14,
+			0, 111, buttonWidth + 35, 14,
 			WS_VISIBLE | WS_TABSTOP, 0)
 	};
 
@@ -1740,23 +1743,44 @@ void DialogAbout::TabVersion::Initialize()
 	Static_SetIcon(item, icon);
 
 	item = GetControl(Id_VersionLabel);
+	WCHAR lang[MAX_PATH];
+	LCID lcid = GetRainmeter().GetResourceLCID();
+	std::wstring langId = std::to_wstring(lcid);
+	GetLocaleInfo(lcid, LOCALE_SENGLISHLANGUAGENAME, lang, MAX_PATH);
 	WCHAR tmpSz[64];
-	_snwprintf_s(tmpSz, _TRUNCATE, L"%s%s r%i %s (%s)", APPVERSION, revision_beta ? L" beta" : L"", revision_number, APPBITS, APPDATE);
+	_snwprintf_s(tmpSz, _TRUNCATE, L"%s%s r%i %s (%s) - %s (%s)",
+		APPVERSION, revision_beta ? L" beta" : L"", revision_number, APPBITS, APPDATE, lang, langId.c_str());
 	SetWindowText(item, tmpSz);
 
 	item = GetControl(Id_WinVerLabel);
-	SetWindowText(item, Platform::GetPlatformFriendlyName().c_str());
-
-	item = GetControl(Id_PathLabel);
-	std::wstring text = L"Path: " + GetRainmeter().GetPath();
+	lcid = GetUserDefaultLCID();
+	langId = std::to_wstring(lcid);
+	GetLocaleInfo(lcid, LOCALE_SENGLISHLANGUAGENAME, lang, MAX_PATH);
+	std::wstring text = Platform::GetPlatformFriendlyName() + L" - ";
+	text += lang;
+	text += L" (";
+	text += langId;
+	text += L')';
 	SetWindowText(item, text.c_str());
 
-	item = GetControl(Id_IniFileLabel);
-	text = L"IniFile: " + GetRainmeter().GetIniFile();
+	item = GetControl(Id_PathLink);
+	text = L"Path: <a>" + GetRainmeter().GetPath();
+	text += L"</a>";
 	SetWindowText(item, text.c_str());
 
-	item = GetControl(Id_SkinPathLabel);
-	text = L"SkinPath: " + GetRainmeter().GetSkinPath();
+	item = GetControl(Id_SkinPathLink);
+	text = L"SkinPath: <a>" + GetRainmeter().GetSkinPath();
+	text += L"</a>";
+	SetWindowText(item, text.c_str());
+
+	item = GetControl(Id_SettingsPathLink);
+	text = L"SettingsPath: <a>" + GetRainmeter().GetSettingsPath();
+	text += L"</a>";
+	SetWindowText(item, text.c_str());
+
+	item = GetControl(Id_IniFileLink);
+	text = L"IniFile: <a>" + GetRainmeter().GetIniFile();
+	text += L"</a>";
 	SetWindowText(item, text.c_str());
 
 	m_Initialized = true;
@@ -1791,17 +1815,35 @@ INT_PTR DialogAbout::TabVersion::OnCommand(WPARAM wParam, LPARAM lParam)
 	{
 	case Id_CopyButton:
 		{
+			WCHAR lang[MAX_PATH];
+			LCID lcid = GetRainmeter().GetResourceLCID();
+			std::wstring langId = std::to_wstring(lcid);
+			GetLocaleInfo(lcid, LOCALE_SENGLISHLANGUAGENAME, lang, MAX_PATH);
+
 			WCHAR tmpSz[64];
-			int len = _snwprintf_s(tmpSz, _TRUNCATE, L"%s%s r%i %s (%s)", APPVERSION, revision_beta ? L" beta" : L"", revision_number, APPBITS, APPDATE);
+			int len = _snwprintf_s(tmpSz, _TRUNCATE, L"%s%s r%i %s (%s) - %s (%s)",
+				APPVERSION, revision_beta ? L" beta" : L"", revision_number, APPBITS, APPDATE, lang, langId.c_str());
+
 			std::wstring text(tmpSz, len);
 			text += L'\n';
 			text += Platform::GetPlatformFriendlyName();
-			text += L"\nPath: ";
+
+			lcid = GetUserDefaultLCID();
+			langId = std::to_wstring(lcid);
+			GetLocaleInfo(lcid, LOCALE_SENGLISHLANGUAGENAME, lang, MAX_PATH);
+
+			text += L" - ";
+			text += lang;
+			text += L" (";
+			text += langId;
+			text += L")\nPath: ";
 			text += GetRainmeter().GetPath();
-			text += L"\nIniFile: ";
-			text += GetRainmeter().GetIniFile();
 			text += L"\nSkinPath: ";
 			text += GetRainmeter().GetSkinPath();
+			text += L"\nSettingsPath: ";
+			text += GetRainmeter().GetSettingsPath();
+			text += L"\nIniFile: ";
+			text += GetRainmeter().GetIniFile();
 			System::SetClipboardText(text);
 		}
 		break;
@@ -1826,6 +1868,22 @@ INT_PTR DialogAbout::TabVersion::OnNotify(WPARAM wParam, LPARAM lParam)
 		else if (nm->idFrom == Id_LicenseLink)
 		{
 			CommandHandler::RunFile(L"http://gnu.org/licenses");
+		}
+		else if (nm->idFrom == Id_PathLink)
+		{
+			CommandHandler::RunFile(GetRainmeter().GetPath().c_str());
+		}
+		else if (nm->idFrom == Id_SkinPathLink)
+		{
+			CommandHandler::RunFile(GetRainmeter().GetSkinPath().c_str());
+		}
+		else if (nm->idFrom == Id_SettingsPathLink)
+		{
+			CommandHandler::RunFile(GetRainmeter().GetSettingsPath().c_str());
+		}
+		else if (nm->idFrom == Id_IniFileLink)
+		{
+			CommandHandler::RunFile(GetRainmeter().GetSkinEditor().c_str(), GetRainmeter().GetIniFile().c_str());
 		}
 		break;
 

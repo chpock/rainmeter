@@ -26,6 +26,7 @@ namespace UsageMonitor
         NETUP,
         CUSTOM
     }
+
     //Types of blocklists
     public enum BlockType
     {
@@ -33,6 +34,7 @@ namespace UsageMonitor
         B, //Blacklist
         W //Whitelist
     }
+
     //Contains all the options for the measure
     public class MeasureOptions
     {
@@ -41,6 +43,8 @@ namespace UsageMonitor
         {
             this.API = API;
         }
+
+        public Instance currInstace;
 
         //One of these will normally be empty/0
         public int Index;
@@ -53,18 +57,20 @@ namespace UsageMonitor
         public bool IsRollup = true;
         public BlockType BlockType { get; private set; } = BlockType.B;
         public HashSet<String> BlockList { get; private set; } = new HashSet<string> { "_Total", "Idle" };
+
         //This is the key that is used to identify if a blocklist can be shared, it is the options rollup status, blocktype, and list
-        public String BlockString { get; private set; } = true.ToString() + BlockType.B + "|" + String.Join(",", new List<string> { "_Total", "Idle" }.ToArray());
+        public String BlockString { get; private set; } = true.ToString() + BlockType.B + "|" + String.Join("|", new List<string> { "_Total", "Idle" }.ToArray());
         public void UpdateBlockList(BlockType blockType, HashSet<String> blockList)
         {
             this.BlockType = blockType;
             this.BlockList = blockList;
-            this.BlockString = IsRollup.ToString() + this.BlockType + "|" + String.Join(",", this.BlockList.ToArray());
+            this.BlockString = IsRollup.ToString() + this.BlockType + "|" + String.Join("|", this.BlockList.ToArray());
         }
+
         public void UpdateBlockList(BlockType blockType, String blockList)
         {
             this.BlockType = blockType;
-            this.BlockList = new HashSet<string>(blockList.Split(',').Select(p => p.Trim()));
+            this.BlockList = new HashSet<string>(blockList.Split('|').Select(p => p.Trim()));
             this.BlockString = IsRollup.ToString() + this.BlockType + "|" + blockList;
         }
 
@@ -75,6 +81,7 @@ namespace UsageMonitor
         public string ID;
         public String Category;
         public String Counter;
+
         //These are the original info before translation, if we detect that a specific category or counter does not exist we will try using these instead
         //These are null if there was no translation applied
         public String UntranslatedCategory = "";
@@ -82,7 +89,7 @@ namespace UsageMonitor
 
         //Takes an alias and changes the options to be ideal for that alias
         //@TODO add NETUP and NETDOWN support
-        public void DeAlias(MeasureAlias alias)
+        public void DeAlias(MeasureAlias alias, ref double maxValue)
         {
             if (alias == MeasureAlias.CPU)
             {
@@ -120,6 +127,9 @@ namespace UsageMonitor
                 this.Category = "GPU Engine";
                 this.Counter = "Utilization Percentage";
                 this.IsPID = true;
+
+                //GPU is an odd case since it has no _Total and can not use Percent=1 so we manually set MaxValue=100
+                maxValue = 100.0;
             }
             else if (alias == MeasureAlias.VRAM)
             {
@@ -143,12 +153,22 @@ namespace UsageMonitor
         public String Name;
         public double Value;
         public CounterSample Sample;
+        public double? _Total;
 
         public Instance(String Name, double Value, CounterSample Sample)
         {
             this.Name = Name;
             this.Value = Value;
             this.Sample = Sample;
+            this._Total = 0.0;
+        }
+
+        public Instance(String Name, double Value, CounterSample Sample, double? _Total)
+        {
+            this.Name = Name;
+            this.Value = Value;
+            this.Sample = Sample;
+            this._Total = _Total;
         }
 
         public int CompareTo(Instance that)
@@ -197,11 +217,16 @@ namespace UsageMonitor
             {
                 //Key for ByName will be the rollup status of the instaces, with the value being the dictionary of the instances by name
                 public Dictionary<bool, Dictionary<String, Instance>> ByName;
+
                 //Key for ByName will be the blocklist of the instaces, with the value being a list of the instances sorted by value
                 public Dictionary<string, List<Instance>> ByUsage;
-                //Key for _Sum will be the blocklist of the instaces, with the value being the sum of that lists value
+
+                //Key for Sum will be the blocklist of the instaces, with the value being the sum of that lists value
                 //I could pack this into the ByUsage list but it seemed pointless
                 public Dictionary<string, double> Sum;
+
+                //Same as Sum but stores averages
+                public Dictionary<string, double> Average;
                 public CounterInfo(int count)
                 {
                     //Key is roll up state as two dictionaries of names can not be shared if they are rolled up differently as they have different values
@@ -211,12 +236,14 @@ namespace UsageMonitor
                     //Key is block string as the list/sum can not be shared if they contain different instances
                     this.ByUsage = new Dictionary<string, List<Instance>>(count);
                     this.Sum = new Dictionary<string, double>(count);
+                    this.Average = new Dictionary<string, double>(count);
                 }
             }
 
             //This is the collection of all the counters and their instances in formatted collection organized by different possible options
             //Key is the name of the counter, with the value being the all the info for the measures using that counter
             private Dictionary<String, CounterInfo> CountersInfo;
+
             //This is the collection of all the counters and the options from the measures referencing it
             //Key is the specific counter with its value being the ID of the measure that gave us the option set and the option set itself
             //@TODO Merge this into CounterInfo class
@@ -226,7 +253,6 @@ namespace UsageMonitor
             private Timer UpdateTimer;
             private TimerInfo UpdateTimerInfo = new TimerInfo("", int.MaxValue);
             private Object UpdateTimerLock = new Object();
-
 
             //Function used to update all info for given category
             //Will format the info then based on current option sets that are using that category
@@ -238,7 +264,8 @@ namespace UsageMonitor
                     {
                         //This is the most expensive part accounting for a very large amount of the CPU, this is avoided at all costs
                         //Avoiding doing this is why this is why this loop is so complex
-                        InstanceDataCollectionCollection currCategoryData = new PerformanceCounterCategory(category).ReadCategory();
+                        var data = new PerformanceCounterCategory(category);
+                        InstanceDataCollectionCollection currCategoryData = data.ReadCategory();
 
                         //This will be our collection of counters for this category, we will build in this temp collection before changing the pointer at the end
                         Dictionary<String, CounterInfo> tempCounters = new Dictionary<string, CounterInfo>(this.CounterOptions.Count());
@@ -246,42 +273,175 @@ namespace UsageMonitor
                         //Loop through each counter
                         foreach (var currCounter in this.CounterOptions)
                         {
-                            //All the instances for this counter unformatted from PerfMon
-                            InstanceDataCollection counterInstances = currCategoryData[currCounter.Key];
-                            //Temp counter info collecetions that we will build on in the option set loop
-                            CounterInfo tempCounterInfo = new CounterInfo(currCounter.Value.Count());
-
-                            //Loop through each option set for the current counter
-                            foreach (var options in currCounter.Value.Values)
+                            try
                             {
-                                //Instances will be added to these collections before being added to tempCounterInfo under the collection with the same name
-                                //They will be added to their collection with a key of what type of option it was formatted under
-                                Dictionary<String, Instance> tempByName;
-                                List<Instance> tempByUsage;
-                                double tempSum = 0;
+                                //All the instances for this counter unformatted from PerfMon
+                                InstanceDataCollection counterInstances = currCategoryData[currCounter.Key];
+                                //Temp counter info collecetions that we will build on in the option set loop
+                                CounterInfo tempCounterInfo = new CounterInfo(currCounter.Value.Count());
 
-                                //If counter did not exist for this category
-                                if (counterInstances == null)
+                                //Loop through each option set for the current counter
+                                //I could try catch this loop but any option set that causes a crash I would imagine the remaining option sets for that counter would cause a crash
+                                foreach (var options in currCounter.Value.Values)
                                 {
-                                    //Throw and error and add nothing to the temp collections
-                                    options.API.Log(API.LogType.Debug, "Could not find a counter in category " + category + " called " + currCounter.Key);
+                                    //Instances will be added to these collections before being added to tempCounterInfo under the collection with the same name
+                                    //They will be added to their collection with a key of what type of option it was formatted under
+                                    Dictionary<String, Instance> tempByName;
+                                    List<Instance> tempByUsage;
+                                    double tempSum = 0.0;
 
-                                    //If we are using a translation and this happens try it untranslated
-                                    if(options.UntranslatedCounter.Count() > 0)
+                                    //If counter did not exist for this category
+                                    if (counterInstances == null)
                                     {
-                                        options.Counter = options.UntranslatedCounter;
-                                        options.UntranslatedCounter = "";
+                                        //Throw and error and add nothing to the temp collections
+                                        options.API.Log(API.LogType.Debug, "Could not find a counter in category " + category + " called " + currCounter.Key);
+
+                                        //If we are using a translation and this happens try it untranslated
+                                        if (options.UntranslatedCounter.Count() > 0)
+                                        {
+                                            options.Counter = options.UntranslatedCounter;
+                                            options.UntranslatedCounter = "";
+                                        }
                                     }
-                                }
-                                //If there is already an ByName list that can be shared with this option set start from that
-                                else if (tempCounterInfo.ByName.TryGetValue(options.IsRollup, out tempByName))
-                                {
-                                    //If there is not already a ByUsage list that can be shared with this option set then calculate a new one from ByName
-                                    if (!tempCounterInfo.ByUsage.TryGetValue(options.BlockString, out tempByUsage))
+                                    //If there is already an ByName list that can be shared with this option set start from that
+                                    else if (tempCounterInfo.ByName.TryGetValue(options.IsRollup, out tempByName))
                                     {
+                                        //If there is not already a ByUsage list that can be shared with this option set then calculate a new one from ByName
+                                        if (!tempCounterInfo.ByUsage.TryGetValue(options.BlockString, out tempByUsage))
+                                        {
+                                            tempByUsage = new List<Instance>();
+
+                                            //Generate a new ByUsage list that complies with this option set's blocklist
+                                            foreach (var instance in tempByName.Values.ToList())
+                                            {
+                                                //Check that either item is not in the blacklist or is in the whitelist
+                                                if ((options.BlockType == BlockType.N)
+                                                    || (options.BlockType == BlockType.B && !options.BlockList.Contains(instance.Name))
+                                                    || (options.BlockType == BlockType.W && options.BlockList.Contains(instance.Name)))
+                                                {
+                                                    tempByUsage.Add(instance);
+                                                    tempSum += instance.Value;
+                                                }
+                                            }
+                                            tempByUsage.Sort();
+
+                                            //Add to temp collection as we are done
+                                            tempCounterInfo.ByUsage.Add(options.BlockString, tempByUsage);
+                                            tempCounterInfo.Sum.Add(options.BlockString, tempSum);
+
+                                            //If summ is greater than 0 calculate average
+                                            if (tempSum > 0.0)
+                                            {
+                                                tempCounterInfo.Average.Add(options.BlockString, tempSum / Convert.ToDouble(tempByUsage.Count));
+                                            }
+                                            else
+                                            {
+                                                tempCounterInfo.Average.Add(options.BlockString, 0.0);
+                                            }
+                                        }
+                                        //If there was then we are done as nothing more needs done
+                                    }
+                                    //If there was not already an ByName list that could be shared start for scratch
+                                    else
+                                    {
+                                        tempByName = new Dictionary<string, Instance>(counterInstances.Count);
+                                        bool hasLastUpdate = this.CountersInfo.TryGetValue(currCounter.Key, out CounterInfo lastInfo);
+
+                                        //Go through each instance and format the data for use with Rainmeter such as PID translation & interpreting raw values
+                                        foreach (InstanceData instanceData in counterInstances.Values)
+                                        {
+                                            try
+                                            {
+                                                Instance instance = new Instance(instanceData.InstanceName, instanceData.RawValue, instanceData.Sample);
+
+                                                //Instance name is a PID and needs to be converted to a process name
+                                                //NOTE: If we found we needed to translate different looking PIDs then that would go here
+                                                if (options.IsPID)
+                                                {
+                                                    //This could be more hard coded but I wanted to be more versitile;
+                                                    int start = instance.Name.IndexOf("pid_") + "pid_".Length;
+                                                    int end = instance.Name.IndexOf("_", start);
+
+                                                    if (Int32.TryParse(instance.Name.Substring(start, end - start), out int myPid))
+                                                    {
+                                                        try
+                                                        {
+                                                            //PIDs will not be interpreted if there is no info to go on and will be left as is
+                                                            if (pids.Count > 0)
+                                                            {
+                                                                instance.Name = pids[myPid];
+                                                            }
+                                                        }
+                                                        catch
+                                                        {
+                                                            options.API.Log(API.LogType.Debug, "Could not find a process with PID of " + myPid + " this PID will be ignored till found");
+                                                            continue;
+                                                        }
+                                                    }
+                                                }
+
+                                                //If we are rolling up similar names then take the last # in the name and remove all after it
+                                                //NOTE: If we wanted to add another way to rollup names it would go here
+                                                if (options.IsRollup)
+                                                {
+                                                    int index = instance.Name.LastIndexOf('#');
+                                                    if (index > 0)
+                                                    {
+                                                        instance.Name = instance.Name.Substring(0, index);
+                                                    }
+                                                }
+
+                                                //Check if we already have a instance with the same name, if we do combine the two now
+                                                if (tempByName.TryGetValue(instance.Name, out Instance mergedInstance))
+                                                {
+                                                    instance.Value += mergedInstance.Value;
+                                                    instance.Sample = new CounterSample(mergedInstance.Sample.RawValue + instance.Sample.RawValue,
+                                                        mergedInstance.Sample.BaseValue, mergedInstance.Sample.CounterFrequency,
+                                                        mergedInstance.Sample.SystemFrequency, mergedInstance.Sample.TimeStamp,
+                                                        mergedInstance.Sample.TimeStamp100nSec, mergedInstance.Sample.CounterType);
+                                                }
+
+                                                //If there is a valid last update value and the current is value process the value to be readable
+                                                //If there is not then set the value to 0
+                                                if (hasLastUpdate && lastInfo.ByName.TryGetValue(options.IsRollup, out Dictionary<string, Instance> lastMeasure)
+                                                    && lastMeasure.TryGetValue(instance.Name, out Instance lastInstance))
+                                                {
+                                                    if (lastInstance.Sample.RawValue != 0 && instance.Sample.RawValue != 0)
+                                                    {
+                                                        instance.Value = CounterSample.Calculate(lastInstance.Sample, instance.Sample);
+                                                    }
+                                                    else
+                                                    {
+                                                        instance.Value = 0.0;
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    instance.Value = 0.0;
+                                                }
+
+                                                //Since instance is human readable at this point go on ahead and either update the old value or add the value to the collection
+                                                if (mergedInstance == null)
+                                                {
+                                                    tempByName.Add(instance.Name, instance);
+                                                }
+                                                else
+                                                {
+                                                    tempByName[mergedInstance.Name] = instance;
+                                                }
+                                            }
+                                            catch (Exception e)
+                                            {
+                                                options.API.Log(API.LogType.Error, "UsageMonitor crashed while updating the " + options.Counter + " counter's instace called " + instanceData.InstanceName);
+                                                options.API.Log(API.LogType.Debug, e.Message);
+                                                options.API.Log(API.LogType.Debug, e.StackTrace);
+                                                continue;
+                                            }
+                                        }
+
                                         tempByUsage = new List<Instance>();
 
-                                        //Generate a new ByUsage list that complies with this option set's blocklist
+                                        //Generate a ByUsage list that complies with this option set's blocklist
                                         foreach (var instance in tempByName.Values.ToList())
                                         {
                                             //Check that either item is not in the blacklist or is in the whitelist
@@ -296,123 +456,33 @@ namespace UsageMonitor
                                         tempByUsage.Sort();
 
                                         //Add to temp collection as we are done
+                                        tempCounterInfo.ByName.Add(options.IsRollup, tempByName);
                                         tempCounterInfo.ByUsage.Add(options.BlockString, tempByUsage);
                                         tempCounterInfo.Sum.Add(options.BlockString, tempSum);
-                                    }
-                                    //If there was then we are done as nothing more needs done
-                                }
-                                //If there was not already an ByName list that could be shared start for scratch
-                                else
-                                {
-                                    tempByName = new Dictionary<string, Instance>(counterInstances.Count);
-                                    bool hasLastUpdate = this.CountersInfo.TryGetValue(currCounter.Key, out CounterInfo lastInfo);
 
-                                    //Go through each instance and format the data for use with Rainmeter such as PID translation & interpreting raw values
-                                    foreach (InstanceData instanceData in counterInstances.Values)
-                                    {
-                                        Instance instance = new Instance(instanceData.InstanceName, instanceData.RawValue, instanceData.Sample);
-
-                                        //Instance name is a PID and needs to be converted to a process name
-                                        //NOTE: If we found we needed to translate different looking PIDs then that would go here
-                                        if (options.IsPID)
+                                        //If summ is greater than 0 calculate average
+                                        if (tempSum > 0)
                                         {
-                                            //This could be more hard coded but I wanted to be more versitile;
-                                            int start = instance.Name.IndexOf("pid_") + "pid_".Length;
-                                            int end = instance.Name.IndexOf("_", start);
-
-                                            if (Int32.TryParse(instance.Name.Substring(start, end - start), out int myPid))
-                                            {
-                                                try
-                                                {
-                                                    //PIDs will not be interpreted if there is no info to go on and will be left as is
-                                                    if (pids.Count > 0)
-                                                    {
-                                                        instance.Name = pids[myPid];
-                                                    }
-                                                }
-                                                catch
-                                                {
-                                                    options.API.Log(API.LogType.Debug, "Could not find a process with PID of " + myPid + " this PID will be ignored till found");
-                                                    continue;
-                                                }
-                                            }
-                                        }
-
-                                        //If we are rolling up similar names then take the last # in the name and remove all after it
-                                        //NOTE: If we wanted to add another way to rollup names it would go here
-                                        if (options.IsRollup)
-                                        {
-                                            int index = instance.Name.LastIndexOf('#');
-                                            if (index > 0)
-                                            {
-                                                instance.Name = instance.Name.Substring(0, index);
-                                            }
-                                        }
-
-                                        //Check if we already have a instance with the same name, if we do combine the two now
-                                        if (tempByName.TryGetValue(instance.Name, out Instance mergedInstance))
-                                        {
-                                            instance.Value += mergedInstance.Value;
-                                            instance.Sample = new CounterSample(mergedInstance.Sample.RawValue + instance.Sample.RawValue,
-                                                mergedInstance.Sample.BaseValue, mergedInstance.Sample.CounterFrequency,
-                                                mergedInstance.Sample.SystemFrequency, mergedInstance.Sample.TimeStamp,
-                                                mergedInstance.Sample.TimeStamp100nSec, mergedInstance.Sample.CounterType);
-                                        }
-
-                                        //If there is a valid last update value and the current is value process the value to be readable
-                                        //If there is not then set the value to 0
-                                        if (hasLastUpdate && lastInfo.ByName.TryGetValue(options.IsRollup, out Dictionary<string, Instance> lastMeasure)
-                                            && lastMeasure.TryGetValue(instance.Name, out Instance lastInstance))
-                                        {
-                                            if (lastInstance.Sample.RawValue != 0 && instance.Sample.RawValue != 0)
-                                            {
-                                                instance.Value = CounterSample.Calculate(lastInstance.Sample, instance.Sample);
-                                            }
-                                            else
-                                            {
-                                                instance.Value = 0;
-                                            }
+                                            tempCounterInfo.Average.Add(options.BlockString, tempSum / Convert.ToDouble(tempByUsage.Count));
                                         }
                                         else
                                         {
-                                            instance.Value = 0;
-                                        }
-
-                                        //Since instance is human readable at this point go on ahead and either update the old value or add the value to the collection
-                                        if (mergedInstance == null)
-                                        {
-                                            tempByName.Add(instance.Name, instance);
-                                        }
-                                        else
-                                        {
-                                            tempByName[mergedInstance.Name] = instance;
+                                            tempCounterInfo.Average.Add(options.BlockString, 0.0);
                                         }
                                     }
-                                    tempByUsage = new List<Instance>();
-
-                                    //Generate a ByUsage list that complies with this option set's blocklist
-                                    foreach (var instance in tempByName.Values.ToList())
-                                    {
-                                        //Check that either item is not in the blacklist or is in the whitelist
-                                        if ((options.BlockType == BlockType.N)
-                                            || (options.BlockType == BlockType.B && !options.BlockList.Contains(instance.Name))
-                                            || (options.BlockType == BlockType.W && options.BlockList.Contains(instance.Name)))
-                                        {
-                                            tempByUsage.Add(instance);
-                                            tempSum += instance.Value;
-                                        }
-                                    }
-                                    tempByUsage.Sort();
-
-                                    //Add to temp collection as we are done
-                                    tempCounterInfo.ByName.Add(options.IsRollup, tempByName);
-                                    tempCounterInfo.ByUsage.Add(options.BlockString, tempByUsage);
-                                    tempCounterInfo.Sum.Add(options.BlockString, tempSum);
                                 }
+
+                                //Add newly formatted counter collections to the collection of counters
+                                tempCounters.Add(currCounter.Key, tempCounterInfo);
                             }
-
-                            //Add newly formatted counter collections to the collection of counters
-                            tempCounters.Add(currCounter.Key, tempCounterInfo);
+                            catch (Exception e)
+                            {
+                                //@TODO should I make this a generic log or a measure specific log
+                                currCounter.Value.Values.FirstOrDefault().API.Log(API.LogType.Error, "UsageMonitor crashed while updating the counter called " + currCounter.Value.Values.FirstOrDefault().Counter);
+                                currCounter.Value.Values.FirstOrDefault().API.Log(API.LogType.Debug, e.Message);
+                                currCounter.Value.Values.FirstOrDefault().API.Log(API.LogType.Debug, e.StackTrace);
+                                continue;
+                            }
                         }
 
                         //Make tempCounter the current counter list
@@ -424,7 +494,6 @@ namespace UsageMonitor
                     catch(InvalidOperationException)
                     {
                         API api = this.CounterOptions.FirstOrDefault().Value.FirstOrDefault().Value.API;
-
                         if (api != null)
                         {
                             api.Log(API.LogType.Debug, "Could not find a category called " + category);
@@ -435,13 +504,16 @@ namespace UsageMonitor
                         }
                         //Do not worry if using a translation since categories must be unique
                     }
-                    catch
+                    catch (Exception e)
                     {
                         API.Log((int)API.LogType.Error, "UsageMonitor crashed trying to update the counters");
+                        API.Log((int)API.LogType.Debug, e.Message);
+                        API.Log((int)API.LogType.Debug, e.StackTrace);
                     }
                     finally
                     {
                         Monitor.Exit(UpdateTimerLock);
+                        //GC.Collect();
                     }
                 }
             }
@@ -478,6 +550,10 @@ namespace UsageMonitor
                     {
                         UnsafeAddCounter(options);
                     }
+                    catch
+                    {
+                        options.API.Log(API.LogType.Error, "There was an error adding this measure to track PerfMon.exe changes");
+                    }
                     finally
                     {
                         Monitor.Exit(UpdateTimerLock);
@@ -488,13 +564,21 @@ namespace UsageMonitor
                     //Start a new thread and forget about it
                     new Thread(() =>
                     {
-                        lock (UpdateTimerLock)
+                        try
                         {
-                            UnsafeAddCounter(options);
+                            lock (UpdateTimerLock)
+                            {
+                                UnsafeAddCounter(options);
+                            }
+                        }
+                        catch
+                        {
+                            options.API.Log(API.LogType.Error, "There was an error adding this measure to track PerfMon.exe changes");
                         }
                     }).Start();
                 }
             }
+
             private void UnsafeAddCounter(MeasureOptions options)
             {
                 //If counter is already being monitored
@@ -503,8 +587,7 @@ namespace UsageMonitor
                     //If measure was already used and just needs values updated
                     if (counter.TryGetValue(options.ID, out MeasureOptions tempOptions))
                     {
-                        //@TODO this is was more complex than just an update because what if category or PerfMon counter changes
-                        //      thus there needs to be safeguards against that either here or more likely in the plugin counter
+                        options.currInstace = tempOptions.currInstace;
                         tempOptions = options;
                     }
                     else
@@ -526,7 +609,15 @@ namespace UsageMonitor
 
                 if (options.IsPID)
                 {
-                    pidIDs.Add(options.ID, options.UpdateInMS);
+                    //If measure was already used and just needs values updated
+                    if (pidIDs.ContainsKey(options.ID))
+                    {
+                        pidIDs[options.ID] = options.UpdateInMS;
+                    }
+                    else
+                    {
+                        pidIDs.Add(options.ID, options.UpdateInMS);
+                    }
 
                     if (pidUpdateTimer == null || pidUpdateTimerInfo.Rate > options.UpdateInMS)
                     {
@@ -535,6 +626,7 @@ namespace UsageMonitor
                     }
                 }
             }
+
             //Removes a a reference to a given counter (Counter is only removed if it is the last reference to that counter) 
             //Will also change update rate if the one removed was the last one with that update rate
             public void RemoveCounter(MeasureOptions options)
@@ -545,6 +637,10 @@ namespace UsageMonitor
                     {
                         UnsafeRemoveCounter(options);
                     }
+                    catch
+                    {
+                        options.API.Log(API.LogType.Error, "There was an error stopping this measure from tracking PerfMon.exe changes");
+                    }
                     finally
                     {
                         Monitor.Exit(UpdateTimerLock);
@@ -552,12 +648,20 @@ namespace UsageMonitor
                 }
                 else
                 {
-                    lock (UpdateTimerLock)
+                    try
                     {
-                        UnsafeRemoveCounter(options);
+                        lock (UpdateTimerLock)
+                        {
+                            UnsafeRemoveCounter(options);
+                        }
+                    }
+                    catch
+                    {
+                        options.API.Log(API.LogType.Error, "There was an error stopping this measure from tracking PerfMon.exe changes");
                     }
                 }
             }
+
             //This uses no locks and does
             private void UnsafeRemoveCounter(MeasureOptions options)
             {
@@ -605,11 +709,13 @@ namespace UsageMonitor
                                             }
                                         }
                                     }
+
                                     if (timerUpdated == true)
                                     {
                                         break;
                                     }
                                 }
+
                                 //if the new rate is different then update the thread with new info
                                 if (newTimerInfo.Rate != pidUpdateTimerInfo.Rate)
                                 {
@@ -648,6 +754,7 @@ namespace UsageMonitor
                                         }
                                     }
                                 }
+
                                 if (timerUpdated == true)
                                 {
                                     break;
@@ -660,30 +767,38 @@ namespace UsageMonitor
                 }
             }
 
-            //Get an instance of a counter ordered by value
+            //Get an instance of a counter ordered by value, if instance number is 0 or -1 it will respectively return CounterInfo.Sum or CounterInfo.Average
             public Instance GetInstance(MeasureOptions options, int instanceNumber)
             {
                 lock (dataLock)
                 {
                     if (CountersInfo.TryGetValue(options.Counter, out CounterInfo counterInfo))
                     {
-                        if (instanceNumber == 0 && counterInfo.Sum.TryGetValue(options.BlockString, out double value))
-                        {
-                            return new Instance("Total", value, new CounterSample());
-                        }
                         //Instances in Rainmeter are not going to be 0 indexed so adjust them to be 0 indexed now
                         instanceNumber--;
                         if (counterInfo.ByUsage.TryGetValue(options.BlockString, out List<Instance> tempByUsage))
                         {
                             if (tempByUsage.Count() > instanceNumber)
                             {
-                                return tempByUsage[instanceNumber];
+                                Instance instance =  tempByUsage[instanceNumber];
+
+                                //Grab the _Total for this Instance so it may be used if needed, if one does not exist set to null
+                                if (this.GetInstance(options, "_Total", out Instance _Total))
+                                {
+                                    instance._Total = _Total.Value;
+                                }
+                                else
+                                {
+                                    instance._Total = null;
+                                }
+                                return instance;
                             }
                         }
                     }
                 }
-                return new Instance("", 0, new CounterSample());
+                return new Instance("", 0.0, new CounterSample());
             }
+
             //Get an instance of a counter by name
             public Instance GetInstance(MeasureOptions options, String instanceName)
             {
@@ -693,15 +808,125 @@ namespace UsageMonitor
                     {
                         if (counterInfo.ByName.TryGetValue(options.IsRollup, out Dictionary<String, Instance> tempByName))
                         {
-                            if (tempByName.TryGetValue(instanceName, out Instance value))
+                            if (tempByName.TryGetValue(instanceName, out Instance instance))
                             {
-                                return value;
+                                //Check that we are not trying to get the _Total, if we are ignore getting _Total
+                                if (instanceName == "_Total")
+                                {
+                                    instance._Total = instance.Value;
+                                }
+                                else
+                                {
+                                    //Grab the _Total for this Instance so it may be used if needed, if one does not exist set to null
+                                    if (this.GetInstance(options, "_Total", out Instance _Total))
+                                    {
+                                        instance._Total = _Total.Value;
+                                    }
+                                    else
+                                    {
+                                        instance._Total = null;
+                                    }
+                                }
+                                return instance;
                             }
                         }
                     }
                 }
-                return new Instance(instanceName, 0, new CounterSample());
+                return new Instance(instanceName, 0.0, new CounterSample());
             }
+
+            //Get an instance of a counter by name, returns false if instance list exists and that instance does not
+            public bool GetInstance(MeasureOptions options, String instanceName, out Instance instance)
+            {
+                instance = new Instance(instanceName, 0.0, new CounterSample());
+                lock (dataLock)
+                {
+                    if (CountersInfo.TryGetValue(options.Counter, out CounterInfo counterInfo))
+                    {
+                        if (counterInfo.ByName.TryGetValue(options.IsRollup, out Dictionary<String, Instance> tempByName))
+                        {
+                            if (tempByName.TryGetValue(instanceName, out Instance tempInstance))
+                            {
+                                //Check that we are not trying to get the _Total, if we are ignore getting _Total
+                                if (instanceName == "_Total")
+                                {
+                                    tempInstance._Total = tempInstance.Value;
+                                }
+                                else
+                                {
+                                    //Grab the _Total for this Instance so it may be used if needed, if one does not exist set to null
+                                    if (this.GetInstance(options, "_Total", out Instance _Total))
+                                    {
+                                        tempInstance._Total = _Total.Value;
+                                    }
+                                    else
+                                    {
+                                        tempInstance._Total = null;
+                                    }
+                                }
+                                instance = tempInstance;
+                                return true;
+                            }
+                            else
+                            {
+                                return false;
+                            }
+                        }
+                    }
+                }
+                return true;
+            }
+            public Instance GetSum(MeasureOptions options)
+            {
+                Instance instance = new Instance("Total", 0.0, new CounterSample());
+                lock (dataLock)
+                {
+                    if (CountersInfo.TryGetValue(options.Counter, out CounterInfo counterInfo))
+                    {
+                        if (counterInfo.Sum.TryGetValue(options.BlockString, out double value))
+                        {
+                            instance.Value = value;
+
+                            //Grab the _Total for this Instance so it may be used if needed, if one does not exist set to null
+                            if (this.GetInstance(options, "_Total", out Instance _Total))
+                            {
+                                instance._Total = _Total.Value;
+                            }
+                            else
+                            {
+                                instance._Total = null;
+                            }
+                        }
+                    }
+                }
+                return instance;
+            }
+            public Instance GetAverage(MeasureOptions options)
+            {
+                Instance instance = new Instance("Average", 0.0, new CounterSample());
+                lock (dataLock)
+                {
+                    if (CountersInfo.TryGetValue(options.Counter, out CounterInfo counterInfo))
+                    {
+                        if (counterInfo.Average.TryGetValue(options.BlockString, out double value))
+                        {
+                            instance.Value = value;
+
+                            //Grab the _Total for this Instance so it may be used if needed, if one does not exist set to null
+                            if (this.GetInstance(options, "_Total", out Instance _Total))
+                            {
+                                instance._Total = _Total.Value;
+                            }
+                            else
+                            {
+                                instance._Total = null;
+                            }
+                        }
+                    }
+                }
+                return instance;
+            }
+
             public int Count()
             {
                 return this.CounterOptions.Count();
@@ -710,13 +935,16 @@ namespace UsageMonitor
 
         //This is a list of all the PIDs and their associated process name, used to decode pids to process names
         private static Dictionary<int, String> pids = new Dictionary<int, String>();
+
         //List of all measures that need PIDs decoded
         private static Dictionary<String, int> pidIDs = new Dictionary<String, int>();
+
         //Used to update pids, is set to lowest update rate of a instance that needs it
         //@TODO share resources with update timers using process category
         private static Timer pidUpdateTimer;
         private static TimerInfo pidUpdateTimerInfo = new TimerInfo("", int.MaxValue);
         private static Object pidUpdateLock = new Object();
+
         //This handles keeping the PID list up to date
         private static void UpdatePIDs()
         {
@@ -724,7 +952,23 @@ namespace UsageMonitor
             {
                 try
                 {
-                    var pidInstance = new PerformanceCounterCategory("Process").ReadCategory()["ID Process"];
+                    string category = "Process";
+                    string counter = "ID Process";
+                    if (Plugin.engToCurrLanguage != null)
+                    {
+                        if (Plugin.engToCurrLanguage.TryGetValue(category, out string translatedString))
+                        {
+                            category = translatedString;
+                        }
+
+                        //If there is a translation dictionary use it
+                        if (Plugin.engToCurrLanguage.TryGetValue(counter, out translatedString))
+                        {
+                            counter = translatedString;
+                        }
+                    }
+
+                    var pidInstance = new PerformanceCounterCategory(category).ReadCategory()[counter];
                     var tempPIDs = new Dictionary<int, String>(pidInstance.Count);
 
                     foreach (InstanceData pid in pidInstance.Values)
@@ -751,7 +995,7 @@ namespace UsageMonitor
                 }
             }
         }
-        
+
         //Parses a new MeasureOption set and creates/adds it to a catefory and its collection of counters it is being used for
         public static void AddMeasure(MeasureOptions options)
         {
@@ -770,6 +1014,7 @@ namespace UsageMonitor
                 }
             }
         }
+
         //Removes MeasureOption set and destroys the category if it is the last option using it
         public static void RemoveMeasure(MeasureOptions options)
         {
@@ -787,6 +1032,7 @@ namespace UsageMonitor
                 }
             }
         }
+
         //Get an instance of a counter ordered by value
         public static Instance GetInstance(MeasureOptions options, int instanceNumber)
         {
@@ -794,8 +1040,9 @@ namespace UsageMonitor
             {
                 return instanceLists.GetInstance(options, instanceNumber);
             }
-            return new Instance("", 0, new CounterSample());
+            return new Instance("", 0.0, new CounterSample());
         }
+
         //Get an instance of a counter by name
         public static Instance GetInstance(MeasureOptions options, String instanceName)
         {
@@ -803,7 +1050,38 @@ namespace UsageMonitor
             {
                 return instanceLists.GetInstance(options, instanceName);
             }
-            return new Instance(instanceName, 0, new CounterSample());
+            return new Instance(instanceName, 0.0, new CounterSample());
+        }
+
+        //Get an instance of a counter by name, returns false if instance list exists but requested instance does not
+        public static bool GetInstance(MeasureOptions options, String instanceName, out Instance instance)
+        {
+            if (CategoriesCounters.TryGetValue(options.Category, out Counters instanceLists))
+            {
+                return instanceLists.GetInstance(options, instanceName, out instance);
+            }
+            instance = new Instance(instanceName, 0.0, new CounterSample());
+            return true;
+        }
+
+        //Get an instance of a counter ordered by value
+        public static Instance GetSum(MeasureOptions options)
+        {
+            if (CategoriesCounters.TryGetValue(options.Category, out Counters instanceLists))
+            {
+                return instanceLists.GetSum(options);
+            }
+            return new Instance("", 0.0, new CounterSample());
+        }
+
+        //Get an instance of a counter ordered by value
+        public static Instance GetAverage(MeasureOptions options)
+        {
+            if (CategoriesCounters.TryGetValue(options.Category, out Counters instanceLists))
+            {
+                return instanceLists.GetAverage(options);
+            }
+            return new Instance("", 0.0, new CounterSample());
         }
     }
 
@@ -814,12 +1092,13 @@ namespace UsageMonitor
             return (Measure)GCHandle.FromIntPtr(data).Target;
         }
         public Rainmeter.API API;
+        public IntPtr buffer = IntPtr.Zero;
         public MeasureOptions Options;
     }
 
     public class Plugin
     {
-        static Dictionary<string, string> engToCurrLanguage;
+        public static Dictionary<string, string> engToCurrLanguage;
 
         [DllExport]
         public static void Initialize(ref IntPtr data, IntPtr rm)
@@ -854,13 +1133,14 @@ namespace UsageMonitor
                                 {
                                     isMatch = true;
                                 }
-                                else if(engNum < num)
+                                else if (engNum < num)
                                 {
                                     while(engNum < num && i < eng.Length-1)
                                     {
                                         i++;
                                         int.TryParse(eng[i], out engNum);
                                     }
+
                                     if (engNum == num)
                                     {
                                         isMatch = true;
@@ -893,6 +1173,11 @@ namespace UsageMonitor
 
             Categories.RemoveMeasure(measure.Options);
 
+            if (measure.buffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(measure.buffer);
+                measure.buffer = IntPtr.Zero;
+            }
             GCHandle.FromIntPtr(data).Free();
         }
 
@@ -900,6 +1185,7 @@ namespace UsageMonitor
         public static void Reload(IntPtr data, IntPtr rm, ref double maxValue)
         {
             Measure measure = (Measure)data;
+
             //We will set this to be the options of the measure later
             MeasureOptions options = new MeasureOptions(measure.API);
             measure.API = (Rainmeter.API)rm;
@@ -918,7 +1204,9 @@ namespace UsageMonitor
                 measure.API.Log(API.LogType.Error, "Alias=" + aliasString + " was not a recognized Alias");
                 alias = MeasureAlias.CPU;
             }
-            options.DeAlias(alias);
+
+            //DeAlias our options, note that if MaxValue needs to manually be set such as with GPU this will handle it
+            options.DeAlias(alias, ref maxValue);
 
             //Read what Performance Monitor info that we will be sampling
             String categoryString = measure.API.ReadString("Category", "");
@@ -926,6 +1214,7 @@ namespace UsageMonitor
             {
                 options.Category = categoryString;
             }
+
             String counterString = measure.API.ReadString("Counter", "");
             if (counterString.Length > 0)
             {
@@ -940,6 +1229,7 @@ namespace UsageMonitor
                     options.UntranslatedCategory = options.Category;
                     options.Category = translatedString;
                 }
+
                 //If there is a translation dictionary use it
                 if (engToCurrLanguage.TryGetValue(options.Counter, out translatedString))
                 {
@@ -959,7 +1249,7 @@ namespace UsageMonitor
             }
             else
             {
-                String blacklist = measure.API.ReadString("Blacklist", "_Total,Idle");
+                String blacklist = measure.API.ReadString("Blacklist", "_Total|Idle");
                 if (blacklist.Length > 0)
                 {
                     options.UpdateBlockList(BlockType.B, blacklist);
@@ -969,14 +1259,17 @@ namespace UsageMonitor
                     options.UpdateBlockList(BlockType.N, "");
                 }
             }
+
             //Is precent is on by default when measure type is CPU
             options.IsPercent = measure.API.ReadInt("Percent", Convert.ToInt32(options.IsPercent)) != 0;
             if (options.IsPercent)
             {
-                maxValue = 100;
+                maxValue = 100.0;
             }
+
             //Is pid is on by default when measure type is GPU or VRAM
             options.IsPID = measure.API.ReadInt("PIDToName", Convert.ToInt32(options.IsPID)) != 0;
+
             //options.UpdateInMS = measure.API.ReadInt("PollRate", options.UpdateInMS);
             //ID of this options set
             options.ID = measure.API.GetSkin() + measure.API.GetMeasureName();
@@ -992,7 +1285,10 @@ namespace UsageMonitor
             }
 
             //Setup new instance if counter and category are set
-            if (options.Counter?.Length > 0 && options.Category?.Length > 0) Categories.AddMeasure(options);
+            if (options.Counter?.Length > 0 && options.Category?.Length > 0)
+            {
+                Categories.AddMeasure(options);
+            }
 
             //One of these will be used later to access data
             options.Index = measure.API.ReadInt("Index", 0);
@@ -1007,47 +1303,61 @@ namespace UsageMonitor
         {
             Measure measure = (Measure)data;
             MeasureOptions options = measure.Options;
-            double ret = 0;
+            double ret = 0.0;
+            options.currInstace = new Instance("", 0.0, new CounterSample());
+
             if (options.Counter?.Length > 0 && options.Category?.Length > 0)
             {
                 if (options.Name.Length > 0)
                 {
-                    //Return raw value if the option is set (RawValue is the value before it goes through CounterSample.Calculate to become human readable)
-                    if (options.IsRawValue)
+                    options.currInstace = Categories.GetInstance(options, options.Name);
+                }
+                else
+                {
+                    //Get the correct instance needed (-1 & 0 result in Average and Sum respectively)
+                    if (options.Index == -1)
                     {
-                        ret = Categories.GetInstance(options, options.Name).Sample.RawValue;
+                        options.currInstace = Categories.GetAverage(options);
                     }
-                    else
+                    else if (options.Index == 0)
                     {
-                        ret = Categories.GetInstance(options, options.Name).Value;
+                        options.currInstace = Categories.GetSum(options);
+                    }
+                    else if (options.Index > 0)
+                    {
+                        options.currInstace = Categories.GetInstance(options, options.Index);
                     }
                 }
-                else if (options.Index >= 0)
+
+                ret = options.currInstace.Value;
+
+                //Make the ret value raw if requested (Overrides Percent=1)
+                if (options.IsRawValue)
                 {
-                    if (options.IsRawValue)
-                    {
-                        ret = Categories.GetInstance(options, options.Index).Sample.RawValue;
-                    }
-                    else
-                    {
-                        ret = Categories.GetInstance(options, options.Index).Value;
-                    }
-                }
-                else if(options.Index == -1)
-                {
-                    ret = 1337;
+                    ret = Convert.ToDouble(options.currInstace.Sample.RawValue);
                 }
                 //Scale it to be out of 100% if user requests it
-                //@TODO have an option to make this _Sum based?
-                if (options.IsPercent)
+                else if (options.IsPercent)
                 {
-                    double sum = Categories.GetInstance(options, "_Total").Value;
+                    if (options.currInstace._Total.HasValue)
+                    {
+                        if (options.currInstace._Total.Value != 0.0)
+                        {
+                            ret = ret / options.currInstace._Total.Value * 100.0;
+                        }
 
-                    //ret is 0 if it would be NaN
-                    ret = sum > 0 ? ret / sum * 100 : 0;
+                        //If ret is bigger than 100 (Normally caused by double vs float differences since this plugin is more accurate than permon _Total is) cap it
+                        if (ret > 100.0)
+                        {
+                            ret = 100.0;
+                        }
+                    }
+                    else
+                    {
+                        measure.API.Log(API.LogType.Notice, "Percent=1 was set on this measure with counter " + measure.Options.Counter + " but that counter does not have an _Total instance");
+                    }
                 }
             }
-
             return ret;
         }
 
@@ -1057,29 +1367,32 @@ namespace UsageMonitor
             Measure measure = (Measure)data;
             MeasureOptions options = measure.Options;
 
-            if (options.Counter?.Length > 0 && options.Category?.Length > 0)
+            if (options.Counter?.Length > 0 && options.Category?.Length > 0 && options.currInstace != null)
             {
+                if (measure.buffer != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(measure.buffer);
+                    measure.buffer = IntPtr.Zero;
+                }
+
                 if (options.Name.Length > 0)
                 {
-                    return Marshal.StringToHGlobalUni(Categories.GetInstance(options, options.Name).Name);
+                    measure.buffer = Marshal.StringToHGlobalUni(options.currInstace.Name);
                 }
-                else if (options.Index >= 0)
+                else
                 {
-                    var temp = Categories.GetInstance(options, options.Index);
-                    //If temp.Value is 0 return empty string
-                    if (temp.Value == 0)
+                    //If current instance is 0 return empty string
+                    if (options.currInstace.Value == 0.0)
                     {
-                        return Marshal.StringToHGlobalUni("");
+                        measure.buffer = Marshal.StringToHGlobalUni("");
                     }
-                    return Marshal.StringToHGlobalUni(temp.Name);
-                }
-                else if (options.Index == -1)
-                {
-                    return Marshal.StringToHGlobalUni("tjhrulz loves you man");
+                    else
+                    {
+                        measure.buffer = Marshal.StringToHGlobalUni(options.currInstace.Name);
+                    }
                 }
             }
-
-            return IntPtr.Zero;
+            return measure.buffer;
         }
 
         //[DllExport]
