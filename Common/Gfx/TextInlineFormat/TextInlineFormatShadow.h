@@ -18,16 +18,16 @@ class TextInlineFormat_Shadow final : public TextInlineFormat
 {
 public:
 	TextInlineFormat_Shadow(const std::wstring& pattern, const FLOAT& blur,
-		const D2D1_POINT_2F& offset, const Gdiplus::Color& color);
+		const D2D1_POINT_2F& offset, const D2D1_COLOR_F& color);
 	virtual ~TextInlineFormat_Shadow();
 	virtual InlineType GetType() override { return InlineType::Shadow; }
 
 	virtual void ApplyInlineFormat(IDWriteTextLayout* layout) override { }
-	void ApplyInlineFormat(ID2D1RenderTarget* target, IDWriteTextLayout* layout,
+	void ApplyInlineFormat(ID2D1DeviceContext* target, IDWriteTextLayout* layout,
 		ID2D1SolidColorBrush* solidBrush, const UINT32& strLen, const D2D1_POINT_2F& drawPosition);
 
 	bool CompareAndUpdateProperties(const std::wstring& pattern, const FLOAT& blur,
-		const D2D1_POINT_2F& offset, const Gdiplus::Color& color);
+		const D2D1_POINT_2F& offset, const D2D1_COLOR_F& color);
 
 private:
 	TextInlineFormat_Shadow();
@@ -35,7 +35,10 @@ private:
 
 	FLOAT m_Blur;
 	D2D1_POINT_2F m_Offset;
-	Gdiplus::Color m_Color;
+	D2D1_COLOR_F m_Color;
+
+	Microsoft::WRL::ComPtr<ID2D1Bitmap> m_Bitmap;
+	Microsoft::WRL::ComPtr<ID2D1BitmapRenderTarget> m_BitmapTarget;
 };
 
 }  // namespace Gfx

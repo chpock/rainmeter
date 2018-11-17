@@ -55,7 +55,7 @@ private:
 	// Creates a new DirectWrite text layout if |str| has changed since last call. Since creating
 	// the layout is costly, it is more efficient to keep reusing the text layout until the text
 	// changes. Returns true if the layout is valid for use.
-	bool CreateLayout(ID2D1RenderTarget* target, const std::wstring& srcStr, float maxW, float maxH, bool gdiEmulation);
+	bool CreateLayout(ID2D1DeviceContext* target, const std::wstring& srcStr, float maxW, float maxH, bool gdiEmulation);
 
 	DWRITE_TEXT_METRICS GetMetrics(const std::wstring& srcStr, bool gdiEmulation, float maxWidth = 10000.0f);
 
@@ -64,14 +64,14 @@ private:
 	void UpdateInlineCase(const size_t& index, const std::wstring pattern, const Gfx::CaseType type);
 	void UpdateInlineCharacterSpacing(const size_t& index, const std::wstring pattern, const FLOAT leading,
 		const FLOAT trailing, const FLOAT advanceWidth);
-	void UpdateInlineColor(const size_t& index, const std::wstring pattern, const Gdiplus::Color color);
+	void UpdateInlineColor(const size_t& index, const std::wstring pattern, const D2D1_COLOR_F& color);
 	void UpdateInlineFace(const size_t& index, const std::wstring pattern, const WCHAR* face);
 	void UpdateInlineGradientColor(const size_t& index, const std::wstring pattern,
 		const std::vector<std::wstring> args, const bool altGamma);
 	void UpdateInlineItalic(const size_t& index, const std::wstring pattern);
 	void UpdateInlineOblique(const size_t& index, const std::wstring pattern);
 	void UpdateInlineShadow(const size_t& index, const std::wstring pattern, const FLOAT blur,
-		const D2D1_POINT_2F offset, const Gdiplus::Color color);
+		const D2D1_POINT_2F offset, const D2D1_COLOR_F& color);
 	void UpdateInlineSize(const size_t& index, const std::wstring pattern, const FLOAT size);
 	void UpdateInlineStretch(const size_t& index, const std::wstring pattern, const DWRITE_FONT_STRETCH stretch);
 	void UpdateInlineStrikethrough(const size_t& index, const std::wstring pattern);
@@ -80,9 +80,9 @@ private:
 	void UpdateInlineUnderline(const size_t& index, const std::wstring pattern);
 	void UpdateInlineWeight(const size_t& index, const std::wstring pattern, const DWRITE_FONT_WEIGHT weight);
 	void ApplyInlineFormatting(IDWriteTextLayout* layout);
-	void ApplyInlineColoring(ID2D1RenderTarget* target, const D2D1_POINT_2F* point);
+	void ApplyInlineColoring(ID2D1DeviceContext* target, const D2D1_POINT_2F* point);
 	void ApplyInlineCase(std::wstring& str);
-	void ApplyInlineShadow(ID2D1RenderTarget* target, ID2D1SolidColorBrush* solidBrush,
+	void ApplyInlineShadow(ID2D1DeviceContext* target, ID2D1SolidColorBrush* solidBrush,
 		const UINT32 strLen, const D2D1_POINT_2F& drawPosition);
 	void ResetGradientPosition(const D2D1_POINT_2F* point);
 	void ResetInlineColoring(ID2D1SolidColorBrush* solidColor, const UINT32 strLen);

@@ -84,8 +84,8 @@ namespace UsageMonitor
 
         //These are the original info before translation, if we detect that a specific category or counter does not exist we will try using these instead
         //These are null if there was no translation applied
-        public String UntranslatedCategory = "";
-        public String UntranslatedCounter = "";
+        public String TranslatedCategory = "";
+        public String TranslatedCounter = "";
 
         //Takes an alias and changes the options to be ideal for that alias
         //@TODO add NETUP and NETDOWN support
@@ -297,10 +297,10 @@ namespace UsageMonitor
                                         options.API.Log(API.LogType.Debug, "Could not find a counter in category " + category + " called " + currCounter.Key);
 
                                         //If we are using a translation and this happens try it untranslated
-                                        if (options.UntranslatedCounter.Count() > 0)
+                                        if (options.TranslatedCounter.Count() > 0)
                                         {
-                                            options.Counter = options.UntranslatedCounter;
-                                            options.UntranslatedCounter = "";
+                                            options.Counter = options.TranslatedCounter;
+                                            options.TranslatedCounter = "";
                                         }
                                     }
                                     //If there is already an ByName list that can be shared with this option set start from that
@@ -954,19 +954,6 @@ namespace UsageMonitor
                 {
                     string category = "Process";
                     string counter = "ID Process";
-                    if (Plugin.engToCurrLanguage != null)
-                    {
-                        if (Plugin.engToCurrLanguage.TryGetValue(category, out string translatedString))
-                        {
-                            category = translatedString;
-                        }
-
-                        //If there is a translation dictionary use it
-                        if (Plugin.engToCurrLanguage.TryGetValue(counter, out translatedString))
-                        {
-                            counter = translatedString;
-                        }
-                    }
 
                     var pidInstance = new PerformanceCounterCategory(category).ReadCategory()[counter];
                     var tempPIDs = new Dictionary<int, String>(pidInstance.Count);
@@ -988,6 +975,12 @@ namespace UsageMonitor
                         }
                     }
                     pids = tempPIDs;
+                }
+                catch (Exception e)
+                {
+                    API.Log((int)API.LogType.Error, "UsageMonitor crashed trying to update the PIDs");
+                    API.Log((int)API.LogType.Debug, e.Message);
+                    API.Log((int)API.LogType.Debug, e.StackTrace);
                 }
                 finally
                 {
@@ -1098,7 +1091,8 @@ namespace UsageMonitor
 
     public class Plugin
     {
-        public static Dictionary<string, string> engToCurrLanguage;
+        //Will be used to translate custom categories and counters
+        public static Dictionary<string, string> currLanguageToEnglish;
 
         [DllExport]
         public static void Initialize(ref IntPtr data, IntPtr rm)
@@ -1108,7 +1102,7 @@ namespace UsageMonitor
 
             //Check system language, if it is different from en-US build translation list
             var ci = System.Globalization.CultureInfo.InstalledUICulture.Name;
-            if (ci.CompareTo("en-US") != 0 && engToCurrLanguage == null)
+            if (ci.CompareTo("en-US") != 0 && currLanguageToEnglish == null)
             {
                 //English list
                 //HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib\009\Counter
@@ -1116,7 +1110,7 @@ namespace UsageMonitor
                 //HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib\CurrentLanguage\Counter
                 string[] eng = (string[])Microsoft.Win32.Registry.GetValue("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Perflib\\009", "Counter", "");
                 string[] cur = (string[])Microsoft.Win32.Registry.GetValue("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Perflib\\CurrentLanguage", "Counter", "");
-                engToCurrLanguage = new Dictionary<string, string>(cur.Length / 2);
+                currLanguageToEnglish = new Dictionary<string, string>(cur.Length / 2);
 
                 int i = 0;
                 bool isMatch = false;
@@ -1152,12 +1146,12 @@ namespace UsageMonitor
                         {
                             try
                             {
-                                engToCurrLanguage.Add(eng[i], item);
+                                currLanguageToEnglish.Add(item, eng[i]);
                                 isMatch = false;
                             }
                             catch
                             {
-
+                                //Cheaper to do a try catch than precheck the dictionary
                             }
                         }
                     }
@@ -1212,29 +1206,38 @@ namespace UsageMonitor
             String categoryString = measure.API.ReadString("Category", "");
             if (categoryString.Length > 0)
             {
-                options.Category = categoryString;
+                options.TranslatedCategory = categoryString;
+                //If there is a translation dictionary use it
+                if (currLanguageToEnglish != null)
+                {
+                    //Try to output to the options the english category, if no match keep in original language (Which should then have 0% chance of collision)
+                    if(!currLanguageToEnglish.TryGetValue(categoryString, out options.Category))
+                    {
+                        options.Category = categoryString;
+                    }
+                }
+                else
+                {
+                    options.Category = categoryString;
+                }
             }
 
             String counterString = measure.API.ReadString("Counter", "");
             if (counterString.Length > 0)
             {
-                options.Counter = counterString;
-            }
-
-            //If there is a translation dictionary use it
-            if (engToCurrLanguage != null)
-            {
-                if (engToCurrLanguage.TryGetValue(options.Category, out string translatedString))
-                {
-                    options.UntranslatedCategory = options.Category;
-                    options.Category = translatedString;
-                }
-
+                options.TranslatedCounter = counterString;
                 //If there is a translation dictionary use it
-                if (engToCurrLanguage.TryGetValue(options.Counter, out translatedString))
+                if (currLanguageToEnglish != null)
                 {
-                    options.UntranslatedCounter = options.Counter;
-                    options.Counter = translatedString;
+                    //Try to output to the options the english counter, if no match keep in original language (Which should then have 0% chance of collision)
+                    if (!currLanguageToEnglish.TryGetValue(counterString, out options.Counter))
+                    {
+                        options.Counter = counterString;
+                    }
+                }
+                else
+                {
+                    options.Counter = counterString;
                 }
             }
 
@@ -1306,57 +1309,67 @@ namespace UsageMonitor
             double ret = 0.0;
             options.currInstace = new Instance("", 0.0, new CounterSample());
 
-            if (options.Counter?.Length > 0 && options.Category?.Length > 0)
+            try
             {
-                if (options.Name.Length > 0)
+                if (options.Counter?.Length > 0 && options.Category?.Length > 0)
                 {
-                    options.currInstace = Categories.GetInstance(options, options.Name);
-                }
-                else
-                {
-                    //Get the correct instance needed (-1 & 0 result in Average and Sum respectively)
-                    if (options.Index == -1)
+                    if (options.Name.Length > 0)
                     {
-                        options.currInstace = Categories.GetAverage(options);
-                    }
-                    else if (options.Index == 0)
-                    {
-                        options.currInstace = Categories.GetSum(options);
-                    }
-                    else if (options.Index > 0)
-                    {
-                        options.currInstace = Categories.GetInstance(options, options.Index);
-                    }
-                }
-
-                ret = options.currInstace.Value;
-
-                //Make the ret value raw if requested (Overrides Percent=1)
-                if (options.IsRawValue)
-                {
-                    ret = Convert.ToDouble(options.currInstace.Sample.RawValue);
-                }
-                //Scale it to be out of 100% if user requests it
-                else if (options.IsPercent)
-                {
-                    if (options.currInstace._Total.HasValue)
-                    {
-                        if (options.currInstace._Total.Value != 0.0)
-                        {
-                            ret = ret / options.currInstace._Total.Value * 100.0;
-                        }
-
-                        //If ret is bigger than 100 (Normally caused by double vs float differences since this plugin is more accurate than permon _Total is) cap it
-                        if (ret > 100.0)
-                        {
-                            ret = 100.0;
-                        }
+                        options.currInstace = Categories.GetInstance(options, options.Name);
                     }
                     else
                     {
-                        measure.API.Log(API.LogType.Notice, "Percent=1 was set on this measure with counter " + measure.Options.Counter + " but that counter does not have an _Total instance");
+                        //Get the correct instance needed (-1 & 0 result in Average and Sum respectively)
+                        if (options.Index == -1)
+                        {
+                            options.currInstace = Categories.GetAverage(options);
+                        }
+                        else if (options.Index == 0)
+                        {
+                            options.currInstace = Categories.GetSum(options);
+                        }
+                        else if (options.Index > 0)
+                        {
+                            options.currInstace = Categories.GetInstance(options, options.Index);
+                        }
+                    }
+
+                    ret = options.currInstace.Value;
+
+                    //Make the ret value raw if requested (Overrides Percent=1)
+                    if (options.IsRawValue)
+                    {
+                        ret = Convert.ToDouble(options.currInstace.Sample.RawValue);
+                    }
+                    //Scale it to be out of 100% if user requests it
+                    else if (options.IsPercent)
+                    {
+                        if (options.currInstace._Total.HasValue)
+                        {
+                            if (options.currInstace._Total.Value != 0.0)
+                            {
+                                ret = ret / options.currInstace._Total.Value * 100.0;
+                            }
+
+                            //If ret is bigger than 100 (Normally caused by double vs float differences since this plugin is more accurate than permon _Total is) cap it
+                            if (ret > 100.0)
+                            {
+                                ret = 100.0;
+                            }
+                        }
+                        else
+                        {
+                            measure.API.Log(API.LogType.Notice, "Percent=1 was set on this measure with counter " + measure.Options.Counter + " but that counter does not have an _Total instance");
+                        }
                     }
                 }
+
+            }
+            catch (Exception e)
+            {
+                measure.API.Log(API.LogType.Error, "UsageMonitor crashed trying to update this measure");
+                API.Log((int)API.LogType.Debug, e.Message);
+                API.Log((int)API.LogType.Debug, e.StackTrace);
             }
             return ret;
         }
@@ -1367,30 +1380,39 @@ namespace UsageMonitor
             Measure measure = (Measure)data;
             MeasureOptions options = measure.Options;
 
-            if (options.Counter?.Length > 0 && options.Category?.Length > 0 && options.currInstace != null)
+            try
             {
-                if (measure.buffer != IntPtr.Zero)
+                if (options.Counter?.Length > 0 && options.Category?.Length > 0 && options.currInstace != null)
                 {
-                    Marshal.FreeHGlobal(measure.buffer);
-                    measure.buffer = IntPtr.Zero;
-                }
-
-                if (options.Name.Length > 0)
-                {
-                    measure.buffer = Marshal.StringToHGlobalUni(options.currInstace.Name);
-                }
-                else
-                {
-                    //If current instance is 0 return empty string
-                    if (options.currInstace.Value == 0.0)
+                    if (measure?.buffer != null && measure.buffer != IntPtr.Zero)
                     {
-                        measure.buffer = Marshal.StringToHGlobalUni("");
+                        Marshal.FreeHGlobal(measure.buffer);
+                        measure.buffer = IntPtr.Zero;
                     }
-                    else
+
+                    if (options.Name?.Length > 0)
                     {
                         measure.buffer = Marshal.StringToHGlobalUni(options.currInstace.Name);
                     }
+                    else
+                    {
+                        //If current instance is 0 return empty string
+                        if (options.currInstace.Value == 0.0)
+                        {
+                            measure.buffer = Marshal.StringToHGlobalUni("");
+                        }
+                        else
+                        {
+                            measure.buffer = Marshal.StringToHGlobalUni(options.currInstace.Name);
+                        }
+                    }
                 }
+            }
+            catch (Exception e)
+            {
+                measure.API.Log(API.LogType.Error, "UsageMonitor crashed trying to return the new String value of this measure");
+                API.Log((int)API.LogType.Debug, e.Message);
+                API.Log((int)API.LogType.Debug, e.StackTrace);
             }
             return measure.buffer;
         }

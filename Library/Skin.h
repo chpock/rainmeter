@@ -87,6 +87,7 @@ enum RESIZEMODE
 class Rainmeter;
 class Measure;
 class Meter;
+class GeneralImage;
 
 namespace Gfx {
 class FontCollection;
@@ -129,6 +130,8 @@ public:
 	void RedrawWindow() { UpdateWindow(m_TransparencyValue); }
 	void SetVariable(const std::wstring& variable, const std::wstring& value);
 	void SetOption(const std::wstring& section, const std::wstring& option, const std::wstring& value, bool group);
+	bool HandleContainer(Meter* container);
+	void RecomputeZOrder();
 
 	void SetMouseLeaveEvent(bool cancel);
 	void SetHasMouseScrollAction() { m_HasMouseScrollAction = true; }
@@ -293,7 +296,7 @@ private:
 	bool UpdateMeasure(Measure* measure, bool force);
 	bool UpdateMeter(Meter* meter, bool& bActiveTransition, bool force);
 	void Update(bool refresh);
-	void UpdateWindow(int alpha, bool canvasBeginDrawCalled = false);
+	void UpdateWindow(int alpha);
 	void UpdateWindowTransparency(int alpha);
 	void ReadOptions();
 	void WriteOptions(INT setting = OPTION_ALL);
@@ -324,6 +327,7 @@ private:
 	void SetWindowSizeVariables(int w, int h);
 	void SetFavorite(bool favorite);
 	void DeselectSkinsIfAppropriate(HWND hwnd);
+	void DoRecomputeZOrder();
 
 	void ShowBlur();
 	void HideBlur();
@@ -335,7 +339,7 @@ private:
 
 	ConfigParser m_Parser;
 
-	Gdiplus::Bitmap* m_Background;
+	GeneralImage* m_Background;
 	SIZE m_BackgroundSize;
 
 	HWND m_Window;
@@ -344,6 +348,7 @@ private:
 	bool m_MouseOver;
 	bool m_MouseInputRegistered;
 	bool m_HasMouseScrollAction;
+	bool m_RecomputeZOrder;
 
 	std::wstring m_OnRefreshAction;
 	std::wstring m_OnCloseAction;
@@ -402,9 +407,9 @@ private:
 	bool m_Dragging;
 	bool m_Dragged;
 	BGMODE m_BackgroundMode;
-	Gdiplus::Color m_SolidColor;
-	Gdiplus::Color m_SolidColor2;
-	Gdiplus::REAL m_SolidAngle;
+	D2D1_COLOR_F m_SolidColor;
+	D2D1_COLOR_F m_SolidColor2;
+	FLOAT m_SolidAngle;
 	BEVELTYPE m_SolidBevel;
 
 	bool m_OldWindowDraggable;
@@ -412,7 +417,7 @@ private:
 	bool m_OldClickThrough;
 
 	bool m_Selected;
-	Gdiplus::Color m_SelectedColor;
+	D2D1_COLOR_F m_SelectedColor;
 
 	Group m_DragGroup;
 

@@ -32,6 +32,10 @@ public:
 	static void UpdateSkins(Skin* skin, bool deleted = false);
 	static void UpdateLayouts();
 
+	static void UpdateLanguageStatus();
+
+	static void UpdateSettings();
+
 	static void CloseDialog() { if (c_Dialog) c_Dialog->HandleMessage(WM_CLOSE, 0, 0); }
 
 protected:
@@ -162,13 +166,17 @@ private:
 			Id_LanguageUpdateLink,
 			Id_EditorEdit,
 			Id_EditorBrowseButton,
-			Id_ShowTrayIconCheckBox
+			Id_ShowTrayIconCheckBox,
+			Id_UseHardwareAcceleration
 		};
 
 		TabSettings();
 
 		void Create(HWND owner);
 		virtual void Initialize();
+
+		void UpdateLanguageStatus();
+		void Update();
 
 	protected:
 		virtual INT_PTR HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam);

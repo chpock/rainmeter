@@ -46,9 +46,6 @@ Shape::Shape(ShapeType type) :
 	m_StrokeGradientAltGamma(false),
 	m_HasStrokeBrushChanged(true)
 {
-	// Make sure the stroke width is exact, not altered by other
-	// transforms like Scale or Rotation
-	m_StrokeProperties.transformType = D2D1_STROKE_TRANSFORM_TYPE_FIXED;
 }
 
 Shape::~Shape()
@@ -133,12 +130,9 @@ bool Shape::IsShapeDefined()
 	return m_Shape;
 }
 
-bool Shape::ContainsPoint(D2D1_POINT_2F point, const Gdiplus::Matrix* transformationMatrix)
+bool Shape::ContainsPoint(D2D1_POINT_2F point, const D2D1_MATRIX_3X2_F& transformationMatrix)
 {
-	D2D1_MATRIX_3X2_F matrix = D2D1::Matrix3x2F::Identity();
-
-	// Apply TransformationMatrix if available
-	if (transformationMatrix) transformationMatrix->GetElements((Gdiplus::REAL*)&matrix);
+	D2D1_MATRIX_3X2_F matrix = transformationMatrix;
 
 	matrix = matrix * GetShapeMatrix();
 
@@ -241,7 +235,7 @@ void Shape::SetSkew(FLOAT skewX, FLOAT skewY, FLOAT anchorX, FLOAT anchorY, bool
 	m_SkewAnchorDefined = anchorDefined;
 }
 
-void Shape::CreateStrokeStyle()
+void Shape::CreateStrokeStyle(D2D1_STROKE_TRANSFORM_TYPE transformType)
 {
 	const FLOAT* dashes = nullptr;
 	if (!m_StrokeCustomDashes.empty())
@@ -249,6 +243,8 @@ void Shape::CreateStrokeStyle()
 		m_StrokeProperties.dashStyle = D2D1_DASH_STYLE_CUSTOM;
 		dashes = m_StrokeCustomDashes.data();
 	}
+
+	m_StrokeProperties.transformType = transformType;
 
 	UINT32 dashCount = (UINT32)m_StrokeCustomDashes.size();
 	HRESULT hr = Canvas::c_D2DFactory->CreateStrokeStyle(
@@ -261,10 +257,10 @@ void Shape::CreateStrokeStyle()
 	if (FAILED(hr)) m_StrokeStyle = nullptr;
 }
 
-void Shape::SetFill(Gdiplus::Color color)
+void Shape::SetFill(const D2D1_COLOR_F& color)
 {
 	m_FillBrushType = BrushType::Solid;
-	m_FillColor = Util::ToColorF(color);
+	m_FillColor = color;
 	m_HasFillBrushChanged = true;
 }
 
@@ -288,10 +284,10 @@ void Shape::SetFill(D2D1_POINT_2F offset, D2D1_POINT_2F center, D2D1_POINT_2F ra
 	m_HasFillBrushChanged = true;
 }
 
-void Shape::SetStrokeFill(Gdiplus::Color color)
+void Shape::SetStrokeFill(const D2D1_COLOR_F& color)
 {
 	m_StrokeBrushType = BrushType::Solid;
-	m_StrokeColor = Util::ToColorF(color);
+	m_StrokeColor = color;
 	m_HasStrokeBrushChanged = true;
 }
 
@@ -315,7 +311,7 @@ void Shape::SetStrokeFill(D2D1_POINT_2F offset, D2D1_POINT_2F center, D2D1_POINT
 	m_HasStrokeBrushChanged = true;
 }
 
-Microsoft::WRL::ComPtr<ID2D1Brush> Shape::GetFillBrush(ID2D1RenderTarget* target)
+Microsoft::WRL::ComPtr<ID2D1Brush> Shape::GetFillBrush(ID2D1DeviceContext* target)
 {
 	// If the brush hasn't changed, return current fill brush
 	if (!m_HasFillBrushChanged) return m_FillBrush;
@@ -352,7 +348,7 @@ Microsoft::WRL::ComPtr<ID2D1Brush> Shape::GetFillBrush(ID2D1RenderTarget* target
 	return m_FillBrush;
 }
 
-Microsoft::WRL::ComPtr<ID2D1Brush> Shape::GetStrokeFillBrush(ID2D1RenderTarget* target)
+Microsoft::WRL::ComPtr<ID2D1Brush> Shape::GetStrokeFillBrush(ID2D1DeviceContext* target)
 {
 	// If the brush hasn't changed, return current stroke brush
 	if (!m_HasStrokeBrushChanged) return m_StrokeBrush;
@@ -389,7 +385,7 @@ Microsoft::WRL::ComPtr<ID2D1Brush> Shape::GetStrokeFillBrush(ID2D1RenderTarget* 
 	return m_StrokeBrush;
 }
 
-ID2D1GradientStopCollection* Shape::CreateGradientStopCollection(ID2D1RenderTarget* target,
+ID2D1GradientStopCollection* Shape::CreateGradientStopCollection(ID2D1DeviceContext* target,
 	std::vector<D2D1_GRADIENT_STOP>& stops, bool altGamma)
 {
 	if (stops.empty()) return nullptr;
@@ -406,7 +402,7 @@ ID2D1GradientStopCollection* Shape::CreateGradientStopCollection(ID2D1RenderTarg
 	return collection;
 }
 
-void Shape::CreateSolidBrush(ID2D1RenderTarget* target, Microsoft::WRL::ComPtr<ID2D1Brush>& brush,
+void Shape::CreateSolidBrush(ID2D1DeviceContext* target, Microsoft::WRL::ComPtr<ID2D1Brush>& brush,
 	const D2D1_COLOR_F& color)
 {
 	Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> solid;
@@ -415,14 +411,14 @@ void Shape::CreateSolidBrush(ID2D1RenderTarget* target, Microsoft::WRL::ComPtr<I
 	if (SUCCEEDED(hr)) solid.CopyTo(brush.ReleaseAndGetAddressOf());
 }
 
-void Shape::CreateLinearGradient(ID2D1RenderTarget* target, ID2D1GradientStopCollection* collection,
+void Shape::CreateLinearGradient(ID2D1DeviceContext* target, ID2D1GradientStopCollection* collection,
 	Microsoft::WRL::ComPtr<ID2D1Brush>& brush, const FLOAT angle)
 {
 	auto bounds = GetBounds(false);
 	D2D1_POINT_2F start = Util::FindEdgePoint(angle,
-		bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
+		bounds.left, bounds.top, bounds.right, bounds.bottom);
 	D2D1_POINT_2F end = Util::FindEdgePoint(angle + 180.0f,
-		bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
+		bounds.left, bounds.top, bounds.right, bounds.bottom);
 
 	Microsoft::WRL::ComPtr<ID2D1LinearGradientBrush> linear;
 	HRESULT hr = target->CreateLinearGradientBrush(
@@ -433,7 +429,7 @@ void Shape::CreateLinearGradient(ID2D1RenderTarget* target, ID2D1GradientStopCol
 	if (SUCCEEDED(hr)) linear.CopyTo(brush.ReleaseAndGetAddressOf());
 }
 
-void Shape::CreateRadialGradient(ID2D1RenderTarget* target, ID2D1GradientStopCollection* collection,
+void Shape::CreateRadialGradient(ID2D1DeviceContext* target, ID2D1GradientStopCollection* collection,
 	Microsoft::WRL::ComPtr<ID2D1Brush>& brush, bool isStroke)
 {
 	auto swapIfNotDefined = [](D2D1_POINT_2F& pt1, const D2D1_POINT_2F pt2) -> void

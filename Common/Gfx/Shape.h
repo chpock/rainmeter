@@ -12,7 +12,6 @@
 #include <d2d1_1.h>
 #include <wrl/client.h>
 #include <vector>
-#include <gdiplus.h>
 
 namespace Gfx {
 
@@ -66,7 +65,7 @@ public:
 	D2D1_MATRIX_3X2_F GetShapeMatrix();
 	D2D1_RECT_F GetBounds(bool useMatrix = true);
 	bool IsShapeDefined();
-	bool ContainsPoint(D2D1_POINT_2F point, const Gdiplus::Matrix* transformationMatrix);
+	bool ContainsPoint(D2D1_POINT_2F point, const D2D1_MATRIX_3X2_F& transformationMatrix = D2D1::Matrix3x2F::Identity());
 
 	bool IsCombined() { return m_IsCombined; }
 	void SetCombined() { m_IsCombined = true; }
@@ -85,17 +84,17 @@ public:
 	void SetStrokeLineJoin(D2D1_LINE_JOIN join, FLOAT limit) { m_StrokeProperties.lineJoin = join; m_StrokeProperties.miterLimit = limit; }
 	void SetStrokeDashes(std::vector<FLOAT> dashes) { m_StrokeCustomDashes = dashes; }
 	void SetStrokeDashOffset(FLOAT offset) { m_StrokeProperties.dashOffset = offset; }
-	void CreateStrokeStyle();
+	void CreateStrokeStyle(D2D1_STROKE_TRANSFORM_TYPE transformType = D2D1_STROKE_TRANSFORM_TYPE_FIXED);
 
-	void SetFill(Gdiplus::Color color);
+	void SetFill(const D2D1_COLOR_F& color);
 	void SetFill(FLOAT angle, std::vector<D2D1_GRADIENT_STOP> stops, bool altGamma);
 	void SetFill(D2D1_POINT_2F offset, D2D1_POINT_2F center, D2D1_POINT_2F radius, std::vector<D2D1_GRADIENT_STOP> stops, bool altGamma);
-	Microsoft::WRL::ComPtr<ID2D1Brush> GetFillBrush(ID2D1RenderTarget* target);
+	Microsoft::WRL::ComPtr<ID2D1Brush> GetFillBrush(ID2D1DeviceContext* target);
 
-	void SetStrokeFill(Gdiplus::Color color);
+	void SetStrokeFill(const D2D1_COLOR_F& color);
 	void SetStrokeFill(FLOAT angle, std::vector<D2D1_GRADIENT_STOP> stops, bool altGamma);
 	void SetStrokeFill(D2D1_POINT_2F offset, D2D1_POINT_2F center, D2D1_POINT_2F radius, std::vector<D2D1_GRADIENT_STOP> stops, bool altGamma);
-	Microsoft::WRL::ComPtr<ID2D1Brush> GetStrokeFillBrush(ID2D1RenderTarget* target);
+	Microsoft::WRL::ComPtr<ID2D1Brush> GetStrokeFillBrush(ID2D1DeviceContext* target);
 
 	void ResetTransformOrder() { m_TransformOrder.clear(); }
 	bool AddToTransformOrder(TransformType type);
@@ -109,12 +108,12 @@ protected:
 private:
 	friend class Canvas;
 
-	void CreateSolidBrush(ID2D1RenderTarget* target, Microsoft::WRL::ComPtr<ID2D1Brush>& brush, const D2D1_COLOR_F& color);
+	void CreateSolidBrush(ID2D1DeviceContext* target, Microsoft::WRL::ComPtr<ID2D1Brush>& brush, const D2D1_COLOR_F& color);
 	ID2D1GradientStopCollection* CreateGradientStopCollection(
-		ID2D1RenderTarget* target, std::vector<D2D1_GRADIENT_STOP>& stops, bool altGamma);
-	void CreateLinearGradient(ID2D1RenderTarget* target, ID2D1GradientStopCollection* collection,
+		ID2D1DeviceContext* target, std::vector<D2D1_GRADIENT_STOP>& stops, bool altGamma);
+	void CreateLinearGradient(ID2D1DeviceContext* target, ID2D1GradientStopCollection* collection,
 		Microsoft::WRL::ComPtr<ID2D1Brush>& brush, const FLOAT angle);
-	void CreateRadialGradient(ID2D1RenderTarget* target, ID2D1GradientStopCollection* collection,
+	void CreateRadialGradient(ID2D1DeviceContext* target, ID2D1GradientStopCollection* collection,
 		Microsoft::WRL::ComPtr<ID2D1Brush>& brush, bool isStroke);
 
 	ShapeType m_ShapeType;

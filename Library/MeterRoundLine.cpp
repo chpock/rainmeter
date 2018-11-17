@@ -9,27 +9,35 @@
 #include "MeterRoundLine.h"
 #include "Measure.h"
 #include "../Common/Gfx/Canvas.h"
+#include "../Common/Gfx/Shapes/Path.h"
+#include "../Common/Gfx/Shapes/Ellipse.h"
+#include "../Common/Gfx/Shapes/Line.h"
 
-using namespace Gdiplus;
+namespace {
 
-#define PI	(3.14159265358979323846)
-#define CONVERT_TO_DEGREES(X)	((X) * (180.0 / PI))
+const FLOAT PI = 3.14159265358979323846f;
+const FLOAT PI2 = 2.0f * PI;
+
+constexpr FLOAT ToDegrees(FLOAT x) { return x * (180.0f / PI); }
+constexpr FLOAT Clamp(FLOAT num, FLOAT lower, FLOAT upper) { return max(lower, min(num, upper)); }
+
+}
 
 MeterRoundLine::MeterRoundLine(Skin* skin, const WCHAR* name) : Meter(skin, name),
 	m_Solid(false),
 	m_LineWidth(1.0),
 	m_LineLength(20.0),
 	m_LineStart(-1.0),
-	m_StartAngle(),
+	m_StartAngle(0.0),
 	m_RotationAngle(6.2832),
 	m_CntrlAngle(true),
 	m_CntrlLineStart(false),
 	m_CntrlLineLength(false),
-	m_LineStartShift(),
-	m_LineLengthShift(),
-	m_ValueRemainder(),
-	m_LineColor(Color::Black),
-	m_Value()
+	m_LineStartShift(0.0),
+	m_LineLengthShift(0.0),
+	m_ValueRemainder(0U),
+	m_LineColor(D2D1::ColorF(D2D1::ColorF::Black)),
+	m_Value(0.0)
 {
 }
 
@@ -50,9 +58,9 @@ void MeterRoundLine::ReadOptions(ConfigParser& parser, const WCHAR* section)
 	m_LineStart = parser.ReadFloat(section, L"LineStart", -1.0);
 	m_StartAngle = parser.ReadFloat(section, L"StartAngle", 0.0);
 	m_RotationAngle = parser.ReadFloat(section, L"RotationAngle", 6.2832);
-	m_ValueRemainder = parser.ReadInt(section, L"ValueReminder", 0);		// Typo
-	m_ValueRemainder = parser.ReadInt(section, L"ValueRemainder", m_ValueRemainder);
-	m_LineColor = parser.ReadColor(section, L"LineColor", Color::Black);
+	m_ValueRemainder = parser.ReadUInt(section, L"ValueReminder", 0U);		// Typo
+	m_ValueRemainder = parser.ReadUInt(section, L"ValueRemainder", m_ValueRemainder);
+	m_LineColor = parser.ReadColor(section, L"LineColor", D2D1::ColorF(D2D1::ColorF::Black));
 	m_Solid = parser.ReadBool(section, L"Solid", false);
 	m_CntrlAngle = parser.ReadBool(section, L"ControlAngle", true);
 	m_CntrlLineStart = parser.ReadBool(section, L"ControlStart", false);
@@ -101,53 +109,81 @@ bool MeterRoundLine::Draw(Gfx::Canvas& canvas)
 {
 	if (!Meter::Draw(canvas)) return false;
 
-	Gdiplus::Graphics& graphics = canvas.BeginGdiplusContext();
+	const FLOAT rotationAngle = (FLOAT)m_RotationAngle;
+	const FLOAT startAngle = (FLOAT)m_StartAngle;
+	const FLOAT value = (FLOAT)m_Value;
+
+	const FLOAT x = (FLOAT)GetX();
+	const FLOAT y = (FLOAT)GetY();
 
 	// Calculate the center of for the line
-	int x = GetX();
-	int y = GetY();
-	double cx = x + m_W / 2.0;
-	double cy = y + m_H / 2.0;
+	const FLOAT cx = x + (FLOAT)m_W / 2.0f;
+	const FLOAT cy = y + (FLOAT)m_H / 2.0f;
 
-	double lineStart = ((m_CntrlLineStart) ? m_LineStartShift * m_Value : 0) + m_LineStart;
-	double lineLength = ((m_CntrlLineLength) ? m_LineLengthShift * m_Value : 0) + m_LineLength;
-
-	// Calculate the end point of the line
-	double angle = ((m_CntrlAngle) ? m_RotationAngle * m_Value : m_RotationAngle) + m_StartAngle;
-	double e_cos = cos(angle);
-	double e_sin = sin(angle);
-
-	REAL sx = (REAL)(e_cos * lineStart + cx);
-	REAL sy = (REAL)(e_sin * lineStart + cy);
-	REAL ex = (REAL)(e_cos * lineLength + cx);
-	REAL ey = (REAL)(e_sin * lineLength + cy);
+	const FLOAT lineStart = (FLOAT)(((m_CntrlLineStart) ? m_LineStartShift * m_Value : 0.0) + m_LineStart);
+	const FLOAT lineLength = (FLOAT)(((m_CntrlLineLength) ? m_LineLengthShift * m_Value : 0.0) + m_LineLength);
 
 	if (m_Solid)
 	{
-		REAL startAngle = (REAL)(fmod(CONVERT_TO_DEGREES(m_StartAngle), 360.0));
-		REAL sweepAngle = (REAL)(CONVERT_TO_DEGREES(m_RotationAngle * m_Value));
+		const FLOAT angle = Clamp(rotationAngle * (m_CntrlAngle ? value : 1.0f), -PI2, PI2) + startAngle;
 
-		// Calculate the start point of the line
-		double s_cos = cos(m_StartAngle);
-		double s_sin = sin(m_StartAngle);
+		const FLOAT e_cos = std::cos(angle);
+		const FLOAT e_sin = std::sin(angle);
 
-		//Create a path to surround the arc
-		GraphicsPath path;
-		path.AddArc((REAL)(cx - lineStart), (REAL)(cy - lineStart), (REAL)(lineStart * 2.0), (REAL)(lineStart * 2.0), startAngle, sweepAngle);
-		path.AddLine((REAL)(lineStart * s_cos + cx), (REAL)(lineStart * s_sin + cy), (REAL)(lineLength * s_cos + cx), (REAL)(lineLength * s_sin + cy));
-		path.AddArc((REAL)(cx - lineLength), (REAL)(cy - lineLength), (REAL)(lineLength * 2.0), (REAL)(lineLength * 2.0), startAngle, sweepAngle);
-		path.AddLine(ex, ey, sx, sy);
+		const FLOAT sx = e_cos * lineStart + cx;
+		const FLOAT sy = e_sin * lineStart + cy;
+		const FLOAT ex = e_cos * lineLength + cx;
+		const FLOAT ey = e_sin * lineLength + cy;
 
-		SolidBrush solidBrush(m_LineColor);
-		graphics.FillPath(&solidBrush, &path);
+		const FLOAT sweepAngle = ToDegrees(Clamp(rotationAngle * value, -PI2, PI2));
+
+		const D2D1_SWEEP_DIRECTION sweepInnerDir = sweepAngle > 0.0f ?
+			D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE : D2D1_SWEEP_DIRECTION_CLOCKWISE;
+
+		const D2D1_SWEEP_DIRECTION sweepOuterDir = (D2D1_SWEEP_DIRECTION)(1 - sweepInnerDir);
+
+		const D2D1_ARC_SIZE arcSize = std::abs(sweepAngle) < 180.0f ?
+			D2D1_ARC_SIZE_SMALL : D2D1_ARC_SIZE_LARGE;
+
+		const FLOAT s_cos = std::cos(startAngle + 0.001f);  // Offset angle in case drawing points are too close to each other
+		const FLOAT s_sin = std::sin(startAngle + 0.001f);
+
+		const FLOAT ix = lineStart * s_cos + cx;
+		const FLOAT iy = lineStart * s_sin + cy;
+		const FLOAT ox = lineLength * s_cos + cx;
+		const FLOAT oy = lineLength * s_sin + cy;
+
+		Gfx::Path path(ix, iy, D2D1_FILL_MODE_ALTERNATE);
+		path.SetFill(m_LineColor);
+		path.SetStrokeWidth(0.0f);
+		path.CreateStrokeStyle();
+
+		path.AddLine(ox, oy);
+		path.AddArc(ex, ey, lineLength, lineLength, sweepAngle, sweepOuterDir, arcSize);
+		path.AddLine(sx, sy);
+		path.AddArc(ix, iy, lineStart, lineStart, sweepAngle, sweepInnerDir, arcSize);
+
+		path.Close(D2D1_FIGURE_END_CLOSED);
+		canvas.DrawGeometry(path, 0, 0);
 	}
 	else
 	{
-		Pen pen(m_LineColor, (REAL)m_LineWidth);
-		graphics.DrawLine(&pen, sx, sy, ex, ey);
-	}
+		const FLOAT angle = (FLOAT)(((m_CntrlAngle) ? m_RotationAngle * m_Value : m_RotationAngle) + m_StartAngle);
 
-	canvas.EndGdiplusContext();
+		const FLOAT e_cos = std::cos(angle);
+		const FLOAT e_sin = std::sin(angle);
+
+		const FLOAT sx = e_cos * lineStart + cx;
+		const FLOAT sy = e_sin * lineStart + cy;
+		const FLOAT ex = e_cos * lineLength + cx;
+		const FLOAT ey = e_sin * lineLength + cy;
+
+		Gfx::Line line(sx, sy, ex, ey);
+		line.SetStrokeFill(m_LineColor);
+		line.SetStrokeWidth((FLOAT)m_LineWidth);
+		line.CreateStrokeStyle();
+		canvas.DrawGeometry(line, 0, 0);
+	}
 
 	return true;
 }

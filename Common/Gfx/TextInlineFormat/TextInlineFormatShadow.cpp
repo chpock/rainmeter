@@ -7,20 +7,17 @@
 
 #include "StdAfx.h"
 #include "TextInlineFormatShadow.h"
-
-namespace {
-
-D2D1_VECTOR_4F ToVector4F(const Gdiplus::Color& color)
-{
-	return D2D1::Vector4F(color.GetR() / 255.0f, color.GetG() / 255.0f, color.GetB() / 255.0f, color.GetA() / 255.0f);
-}
-
-}  // namespace
+#include "Gfx/Util/D2DUtil.h"
 
 namespace Gfx {
 
+D2D1_VECTOR_4F ToVector4F(D2D1_COLOR_F color)
+{
+	return D2D1::Vector4F(color.r, color.g, color.b, color.a);
+}
+
 TextInlineFormat_Shadow::TextInlineFormat_Shadow(const std::wstring& pattern, const FLOAT& blur,
-	const D2D1_POINT_2F& offset, const Gdiplus::Color& color) :
+	const D2D1_POINT_2F& offset, const D2D1_COLOR_F& color) :
 		TextInlineFormat(pattern),
 		m_Offset(offset),
 		m_Blur(blur),
@@ -32,7 +29,7 @@ TextInlineFormat_Shadow::~TextInlineFormat_Shadow()
 {
 }
 
-void TextInlineFormat_Shadow::ApplyInlineFormat(ID2D1RenderTarget* target, IDWriteTextLayout* layout,
+void TextInlineFormat_Shadow::ApplyInlineFormat(ID2D1DeviceContext* target, IDWriteTextLayout* layout,
 	ID2D1SolidColorBrush* solidBrush, const UINT32& strLen, const D2D1_POINT_2F& drawPosition)
 {
 	if (!target || !layout) return;
@@ -42,7 +39,8 @@ void TextInlineFormat_Shadow::ApplyInlineFormat(ID2D1RenderTarget* target, IDWri
 	// we want a shadow for onto a memory bitmap. From this bitmap we can create the shadow
 	// effect and draw it.
 
-	D2D1_COLOR_F color = D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f);
+	const D2D1_COLOR_F& color = Util::c_Transparent_Color_F;
+
 	Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> transparent;
 	HRESULT hr = target->CreateSolidColorBrush(color, transparent.GetAddressOf());
 	if (FAILED(hr)) return;
@@ -69,42 +67,46 @@ void TextInlineFormat_Shadow::ApplyInlineFormat(ID2D1RenderTarget* target, IDWri
 		}
 	}
 
-	Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
-	Microsoft::WRL::ComPtr<ID2D1BitmapRenderTarget> bTarget;
-	hr = target->CreateCompatibleRenderTarget(bTarget.GetAddressOf());
-	if (FAILED(hr)) return;
-	
-	// Draw onto memory bitmap target
-	bTarget->BeginDraw();
-	bTarget->DrawTextLayout(drawPosition, layout, solidBrush);
-	bTarget->EndDraw();
-	hr = bTarget->GetBitmap(bitmap.GetAddressOf());
-	if (FAILED(hr)) return;
+	m_Bitmap.Reset();
 
-	// Shadow effects can only be drawn with a D2D device context
-	Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc;
-	hr = target->QueryInterface(__uuidof(ID2D1DeviceContext), reinterpret_cast<void**>(dc.GetAddressOf()));
+	if (!m_BitmapTarget)
+	{
+		m_BitmapTarget.Reset();
+
+		hr = target->CreateCompatibleRenderTarget(m_BitmapTarget.GetAddressOf());
+		if (FAILED(hr)) return;
+	}
+
+	// Draw onto memory bitmap target
+	// Note: Hardware acceleration seems to keep the bitmap render target in memory
+	// even though it is cleared, so manually "Clear" with a transparent color.
+	m_BitmapTarget->BeginDraw();
+	m_BitmapTarget->Clear(color);
+	m_BitmapTarget->DrawTextLayout(drawPosition, layout, solidBrush);
+	m_BitmapTarget->EndDraw();
+
+	hr = m_BitmapTarget->GetBitmap(m_Bitmap.GetAddressOf());
 	if (FAILED(hr)) return;
 
 	// Create shadow effect
 	Microsoft::WRL::ComPtr<ID2D1Effect> shadow;
-	hr = dc->CreateEffect(CLSID_D2D1Shadow, &shadow);
+	hr = target->CreateEffect(CLSID_D2D1Shadow, shadow.GetAddressOf());
 	if (FAILED(hr)) return;
 
 	// Load shadow options to effect
-	shadow->SetInput(0, bitmap.Get());
+	shadow->SetInput(0U, m_Bitmap.Get());
 	shadow->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, m_Blur);
 	shadow->SetValue(D2D1_SHADOW_PROP_COLOR, ToVector4F(m_Color));
 	shadow->SetValue(D2D1_SHADOW_PROP_OPTIMIZATION, D2D1_SHADOW_OPTIMIZATION_SPEED);
 
 	// Draw effect
-	dc->DrawImage(shadow.Get(), m_Offset);
+	target->DrawImage(shadow.Get(), m_Offset);
 }
 
 bool TextInlineFormat_Shadow::CompareAndUpdateProperties(const std::wstring& pattern, const FLOAT& blur,
-	const D2D1_POINT_2F& offset, const Gdiplus::Color& color)
+	const D2D1_POINT_2F& offset, const D2D1_COLOR_F& color)
 {
-	if (_wcsicmp(GetPattern().c_str(), pattern.c_str()) != 0 || m_Color.GetValue() != color.GetValue())
+	if (_wcsicmp(GetPattern().c_str(), pattern.c_str()) != 0 || !Util::ColorFEquals(m_Color, color))
 	{
 		SetPattern(pattern);
 		m_Offset = offset;

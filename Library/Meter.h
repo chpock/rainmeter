@@ -9,15 +9,13 @@
 #define __METER_H__
 
 #include <windows.h>
-#include <ole2.h>  // For Gdiplus.h.
-#include <gdiplus.h>
 #include <vector>
 #include <string>
-#include "Util.h"
 #include "ConfigParser.h"
 #include "Skin.h"
 #include "Section.h"
 #include "Measure.h"
+#include "../Common/Gfx/RenderTexture.h"
 
 class Measure;
 
@@ -41,9 +39,19 @@ public:
 	virtual int GetY(bool abs = false);
 	RECT GetMeterRect();
 
-	Gdiplus::Rect GetMeterRectPadding();
-	int GetWidthPadding() { return m_Padding.X + m_Padding.Width; }
-	int GetHeightPadding() { return m_Padding.Y + m_Padding.Height; }
+	D2D1_RECT_F GetMeterRectPadding();
+	int GetWidthPadding() { return (int)m_Padding.right; }
+	int GetHeightPadding() { return (int)m_Padding.bottom; }
+
+	Gfx::RenderTexture* GetContainerContentTexture() { return m_ContainerContentTexture; }
+	Gfx::RenderTexture* GetContainerTexture() { return m_ContainerTexture; }
+	void AddContainerItem(Meter* item);
+	void RemoveContainerItem(Meter* item);
+	std::vector<Meter*> GetContainerItems() { return m_ContainerItems; }
+	bool IsContained() { return m_ContainerMeter; }
+	bool IsContainer() { return m_ContainerItems.size() > 0; }
+	Meter* GetContainerMeter() { return m_ContainerMeter; }
+	void UpdateContainer();
 
 	void SetW(int w) { m_W = w; }
 	void SetH(int h) { m_H = h; }
@@ -71,7 +79,7 @@ public:
 	void Show();
 	bool IsHidden() { return m_Hidden; }
 
-	const Gdiplus::Matrix* GetTransformationMatrix() { return m_Transformation; }
+	const D2D1_MATRIX_3X2_F& GetTransformationMatrix() { return m_Transformation; }
 
 	virtual bool HitTest(int x, int y);
 
@@ -80,7 +88,7 @@ public:
 
 	static Meter* Create(const WCHAR* meter, Skin* skin, const WCHAR* name);
 	
-	static void DrawBevel(Gdiplus::Graphics& graphics, const Gdiplus::Rect& rect, const Gdiplus::Pen& light, const Gdiplus::Pen& dark);
+	static void DrawBevel(Gfx::Canvas& canvas, const D2D1_RECT_F& rect, const D2D1_COLOR_F& light, const D2D1_COLOR_F& dark);
 
 protected:
 
@@ -126,7 +134,7 @@ protected:
 	bool m_HDefined;
 	Meter* m_RelativeMeter;
 
-	Gdiplus::Matrix* m_Transformation;
+	D2D1_MATRIX_3X2_F m_Transformation;
 
 	std::wstring m_ToolTipText;
 	std::wstring m_ToolTipTitle;
@@ -144,12 +152,17 @@ protected:
 	METER_POSITION m_RelativeY;
 
 	BEVELTYPE m_SolidBevel;
-	Gdiplus::Color m_SolidColor;
-	Gdiplus::Color m_SolidColor2;
-	Gdiplus::REAL m_SolidAngle;
-	Gdiplus::Rect m_Padding;
+	D2D1_COLOR_F m_SolidColor;
+	D2D1_COLOR_F m_SolidColor2;
+	FLOAT m_SolidAngle;
+	D2D1_RECT_F m_Padding;
 	bool m_AntiAlias;
 	bool m_Initialized;
+
+	Meter* m_ContainerMeter;
+	std::vector<Meter*> m_ContainerItems;
+	Gfx::RenderTexture* m_ContainerContentTexture;
+	Gfx::RenderTexture* m_ContainerTexture;
 };
 
 #endif

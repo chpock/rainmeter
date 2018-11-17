@@ -30,14 +30,15 @@ protected:
 	virtual void BindMeasures(ConfigParser& parser, const WCHAR* section);
 
 private:
-	std::vector<Gdiplus::Color> m_Colors;
+	std::vector<D2D1_COLOR_F> m_Colors;
 	std::vector<double> m_ScaleValues;
 
 	bool m_Autoscale;
 	bool m_HorizontalLines;
 	bool m_Flip;
 	double m_LineWidth;
-	Gdiplus::Color m_HorizontalColor;
+	D2D1_COLOR_F m_HorizontalColor;
+	D2D1_STROKE_TRANSFORM_TYPE m_StrokeType;
 
 	std::vector< std::vector<double> > m_AllValues;
 	int m_CurrentPos;
