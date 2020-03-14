@@ -235,7 +235,8 @@
 #define ID_STR_SKININSTALLER                         2151
 #define ID_STR_ARCHIVEPLUGINS                        2152
 #define ID_STR_HARDWAREACCELERATED                   2153
-#define ID_STR_METERS                                2154
+#define ID_STR_GAMEMODE                              2154
+#define ID_STR_METERS                                2155
 
 #define ID_STR_CREATENEWSKIN                         2999
 #define ID_STR_NEWSKIN                               3000
@@ -335,6 +336,7 @@
 #define IDM_COPYSTRINGVALUE                          4072
 #define IDM_COPYRANGE                                4073
 #define IDM_LANGUAGEOBSOLETE                         4074
+#define IDM_TOGGLE_GAMEMODE                          4075
 
 #define IDM_SKIN_CUSTOMCONTEXTMENU_FIRST             9000
 #define IDM_SKIN_CUSTOMCONTEXTMENU_LAST              9024

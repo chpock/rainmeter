@@ -397,8 +397,14 @@ std::vector<DialogNewSkin::TabNew::SortInfo> DialogNewSkin::TabNew::s_SortInfo;
 DialogNewSkin::TabNew::TabNew() : Tab(),
 	m_IsRoot(true),
 	m_CanAddResourcesFolder(false),
-	m_InRenameMode(false)
+	m_InRenameMode(false),
+	m_ImageList(nullptr)
 {
+}
+
+DialogNewSkin::TabNew::~TabNew()
+{
+	DestroyImageList();
 }
 
 void DialogNewSkin::TabNew::Create(HWND owner)
@@ -472,7 +478,19 @@ void DialogNewSkin::TabNew::Initialize()
 	item = GetControl(Id_ItemsTreeView);
 	TreeView_SetImageList(item, hImageList, TVSIL_NORMAL);
 
+	DestroyImageList();
+	m_ImageList = hImageList;
+
 	m_Initialized = true;
+}
+
+void DialogNewSkin::TabNew::DestroyImageList()
+{
+	if (m_ImageList)
+	{
+		ImageList_Destroy(m_ImageList);
+		m_ImageList = nullptr;
+	}
 }
 
 INT_PTR DialogNewSkin::TabNew::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -1657,10 +1675,10 @@ void DialogNewSkin::TabTemplate::Create(HWND owner)
 
 	static const ControlTemplate::Control s_Controls[] =
 	{
-		CT_GROUPBOX(-1, ID_STR_SAVENEWTEMPLATE,
+		CT_GROUPBOX(-0, ID_STR_SAVENEWTEMPLATE,
 			0, 0, 268, 36,
 			WS_VISIBLE, 0),
-		CT_LABEL(-1, ID_STR_NAMESC,
+		CT_LABEL(-0, ID_STR_NAMESC,
 			6, 16, 55, 9,
 			WS_VISIBLE, 0),
 		CT_EDIT(Id_NewEdit, 0,
@@ -1670,7 +1688,7 @@ void DialogNewSkin::TabTemplate::Create(HWND owner)
 			column1, 14, buttonWidth, 14,
 			WS_VISIBLE | WS_TABSTOP | WS_DISABLED, 0),
 
-		CT_GROUPBOX(-1, ID_STR_SAVEDTEMPLATES,
+		CT_GROUPBOX(-0, ID_STR_SAVEDTEMPLATES,
 			0, 43, 268, 143,
 			WS_VISIBLE , 0),
 		CT_LISTBOX(Id_TemplateListBox, 0,

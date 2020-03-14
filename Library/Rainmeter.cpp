@@ -107,6 +107,7 @@ Rainmeter::Rainmeter() :
 	m_NormalStayDesktop(true),
 	m_DisableRDP(false),
 	m_DisableDragging(false),
+	m_GameMode(false),
 	m_CurrentParser(),
 	m_Window(),
 	m_Mutex(),
@@ -155,7 +156,7 @@ int Rainmeter::Initialize(LPCWSTR iniPath, LPCWSTR layout)
 {
 	if (!IsWindows7SP1OrGreater())
 	{
-		MessageBox(nullptr, L"Rainmeter requires Windows 7 SP1 (with Platform Update) or later.\n\nFor Windows XP or Vista, you can download Rainmeter 3.3 from www.rainmeter.net", APPNAME, MB_OK | MB_TOPMOST | MB_ICONERROR);
+		MessageBox(nullptr, L"Rainmeter requires Windows 7 SP1 (with Platform Update) or later.", APPNAME, MB_OK | MB_TOPMOST | MB_ICONERROR);
 		return 1;
 	}
 
@@ -215,7 +216,7 @@ int Rainmeter::Initialize(LPCWSTR iniPath, LPCWSTR layout)
 		SetHardwareAccelerated(false);
 		if (!Gfx::Canvas::Initialize(m_HardwareAccelerated))
 		{
-			MessageBox(nullptr, L"Rainmeter requires Windows 7 SP1 (with Platform Update) or later.\n\nFor Windows XP or Vista, you can download Rainmeter 3.3 from www.rainmeter.net", APPNAME, MB_OK | MB_TOPMOST | MB_ICONERROR);
+			MessageBox(nullptr, L"Rainmeter requires Windows 7 SP1 (with Platform Update) or later.", APPNAME, MB_OK | MB_TOPMOST | MB_ICONERROR);
 			return 1;
 		}
 	}
@@ -388,8 +389,8 @@ int Rainmeter::Initialize(LPCWSTR iniPath, LPCWSTR layout)
 	}
 #endif // BUILD_TIME
 
-	WCHAR lang[MAX_PATH];
-	GetLocaleInfo(m_ResourceLCID, LOCALE_SENGLISHLANGUAGENAME, lang, MAX_PATH);
+	WCHAR lang[LOCALE_NAME_MAX_LENGTH];
+	GetLocaleInfo(m_ResourceLCID, LOCALE_SENGLISHLANGUAGENAME, lang, _countof(lang));
 	LogNoticeF(L"Rainmeter %s.%i%s (%s)", APPVERSION, revision_number, revision_beta ? L" beta" : L"", APPBITS);
 	LogNoticeF(L"Language: %s (%lu)", lang, m_ResourceLCID);
 	LogNoticeF(L"Build time: %s", m_BuildTime.c_str());
@@ -400,7 +401,10 @@ int Rainmeter::Initialize(LPCWSTR iniPath, LPCWSTR layout)
 	LogNoticeF(L"Commit Hash: %s", L"<Local build>");
 #endif // COMMIT_HASH
 
-	LogNoticeF(L"%s - %s (%lu)", Platform::GetPlatformFriendlyName().c_str(), lang, GetUserDefaultLCID());
+	LogNoticeF(L"%s - %s (%hu)",
+		Platform::GetPlatformFriendlyName().c_str(),
+		Platform::GetPlatformUserLanguage().c_str(),
+		GetUserDefaultUILanguage());
 
 	if (!encodingMsg.empty())
 	{
@@ -592,7 +596,7 @@ LRESULT CALLBACK Rainmeter::MainWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
 	case WM_COPYDATA:
 		{
 			COPYDATASTRUCT* cds = (COPYDATASTRUCT*)lParam;
-			if (cds)
+			if (cds && !GetRainmeter().IsInGameMode())  // Disallow any bangs while in "Game mode"
 			{
 				const WCHAR* data = (const WCHAR*)cds->lpData;
 				if (cds->dwData == 1 && (cds->cbData > 0))
@@ -944,6 +948,10 @@ void Rainmeter::ActivateSkin(int folderIndex, int fileIndex)
 			return;
 		}
 
+		// Verify whether the skin config has an entry in the settings file
+		WCHAR buffer[SHRT_MAX];
+		bool hasSettings = GetPrivateProfileSection(folderPath.c_str(), buffer, SHRT_MAX, m_IniFile.c_str()) > 0;
+
 		if (skinFolder.active != fileIndex + 1)
 		{
 			// Write only if changed.
@@ -960,7 +968,7 @@ void Rainmeter::ActivateSkin(int folderIndex, int fileIndex)
 			m_TrayIcon->SetTrayIcon(m_TrayIcon->IsTrayIconEnabled());
 		}
 
-		CreateSkin(folderPath, file);
+		CreateSkin(folderPath, file, hasSettings);
 	}
 }
 
@@ -1023,6 +1031,27 @@ void Rainmeter::ToggleSkinWithID(UINT id)
 	}
 }
 
+void Rainmeter::ToggleGameMode()
+{
+	if (m_GameMode)
+	{
+		ReloadSettings();
+		ActivateActiveSkins();
+	}
+	else
+	{
+		// Close dialogs if open
+		DialogManage::CloseDialog();
+		DialogAbout::CloseDialog();
+		DialogNewSkin::CloseDialog();
+
+		DeleteAllUnmanagedSkins();
+		DeleteAllSkins();
+		DeleteAllUnmanagedSkins();  // Redelete unmanaged windows caused by OnCloseAction
+	}
+	m_GameMode = !m_GameMode;
+}
+
 void Rainmeter::SetSkinPath(const std::wstring& skinPath)
 {
 	WritePrivateProfileString(L"Rainmeter", L"SkinPath", skinPath.c_str(), m_IniFile.c_str());
@@ -1056,14 +1085,14 @@ void Rainmeter::WriteActive(const std::wstring& folderPath, int fileIndex)
 	WritePrivateProfileString(folderPath.c_str(), L"Active", buffer, m_IniFile.c_str());
 }
 
-void Rainmeter::CreateSkin(const std::wstring& folderPath, const std::wstring& file)
+void Rainmeter::CreateSkin(const std::wstring& folderPath, const std::wstring& file, bool hasSettings)
 {
 	Skin* skin = new Skin(folderPath, file);
 
 	// Note: May modify existing key
 	m_Skins[folderPath] = skin;
 
-	skin->Initialize();
+	skin->Initialize(hasSettings);
 
 	DialogAbout::UpdateSkins();
 	DialogManage::UpdateSkins(skin);

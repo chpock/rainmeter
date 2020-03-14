@@ -228,6 +228,14 @@ bool ConfigParser::GetSectionVariable(std::wstring& strVariable, std::wstring& s
 			{
 				_itow_s(meter->GetH(), buffer, 10);
 			}
+			else if (_wcsicmp(selectorSz, L"XW") == 0)
+			{
+				_itow_s(meter->GetX() + meter->GetW(), buffer, 10);
+			}
+			else if (_wcsicmp(selectorSz, L"YH") == 0)
+			{
+				_itow_s(meter->GetY() + meter->GetH(), buffer, 10);
+			}
 			else
 			{
 				return false;
@@ -817,8 +825,11 @@ bool ConfigParser::ReplaceMeasures(std::wstring& result)
 ** Replaces new-style measure/section variables, regular variables, and mouse variables in the given string.
 **
 */
-bool ConfigParser::ParseVariables(std::wstring& result, const VariableType type, Meter* meter)
+bool ConfigParser::ParseVariables(std::wstring& str, const VariableType type, Meter* meter)
 {
+	// It is possible for a variable to be reset when calling a custom function in a plugin or lua.
+	// Copy the result here, and replace it before returning.
+	std::wstring result = str;
 	bool replaced = false;
 
 	size_t prevStart = 0;
@@ -996,7 +1007,23 @@ bool ConfigParser::ParseVariables(std::wstring& result, const VariableType type,
 		}
 	}
 
+	str = result;
 	return replaced;
+}
+
+bool ConfigParser::ContainsNewStyleVariable(const std::wstring& str)
+{
+	if (str.find(L'[') == std::wstring::npos) return false;
+
+	for (const auto& key : c_VariableMap)
+	{
+		std::wstring var = L"[";
+		var += key.second;
+
+		if (str.find(var) != std::wstring::npos) return true;
+	}
+
+	return false;
 }
 
 std::wstring ConfigParser::GetMouseVariable(const std::wstring& variable, Meter* meter)

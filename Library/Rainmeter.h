@@ -88,6 +88,9 @@ public:
 	void ToggleSkin(int folderIndex, int fileIndex);
 	void ToggleSkinWithID(UINT id);
 
+	bool IsInGameMode() { return m_GameMode; }
+	void ToggleGameMode();
+
 	const std::wstring& GetPath() { return m_Path; }
 	const std::wstring& GetIniFile() { return m_IniFile; }
 	const std::wstring& GetDataFile() { return m_DataFile; }
@@ -197,7 +200,7 @@ private:
 	static LRESULT CALLBACK MainWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 	void ActivateActiveSkins();
-	void CreateSkin(const std::wstring& folderPath, const std::wstring& file);
+	void CreateSkin(const std::wstring& folderPath, const std::wstring& file, bool hasSettings);
 	void DeleteAllSkins();
 	void DeleteAllUnmanagedSkins();
 	void WriteActive(const std::wstring& folderPath, int fileIndex);
@@ -257,6 +260,8 @@ private:
 	bool m_DisableRDP;
 
 	bool m_DisableDragging;
+
+	bool m_GameMode;
 
 	std::wstring m_SkinEditor;
 

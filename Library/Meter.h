@@ -27,6 +27,7 @@ public:
 	Meter(const Meter& other) = delete;
 
 	void ReadOptions(ConfigParser& parser) { ReadOptions(parser, GetName()); parser.ClearStyleTemplate(); }
+	void ReadContainerOptions(ConfigParser& parser) { ReadContainerOptions(parser, GetName()); parser.ClearStyleTemplate(); }
 
 	virtual void Initialize();
 	virtual bool Update();
@@ -47,11 +48,12 @@ public:
 	Gfx::RenderTexture* GetContainerTexture() { return m_ContainerTexture; }
 	void AddContainerItem(Meter* item);
 	void RemoveContainerItem(Meter* item);
-	std::vector<Meter*> GetContainerItems() { return m_ContainerItems; }
-	bool IsContained() { return m_ContainerMeter; }
+	const std::vector<Meter*>& GetContainerItems() { return m_ContainerItems; }
+	bool IsContained() { return m_ContainerMeter != nullptr; }
 	bool IsContainer() { return m_ContainerItems.size() > 0; }
 	Meter* GetContainerMeter() { return m_ContainerMeter; }
 	void UpdateContainer();
+	bool HitTestContainer(int& x, int& y) { return m_ContainerMeter ? m_ContainerMeter->HitTest(x, y) : true; }
 
 	void SetW(int w) { m_W = w; }
 	void SetH(int h) { m_H = h; }
@@ -118,6 +120,8 @@ protected:
 	virtual void BindMeasures(ConfigParser& parser, const WCHAR* section);
 
 	virtual bool IsFixedSize(bool overwrite = false) { return true; }
+
+	void ReadContainerOptions(ConfigParser& parser, const WCHAR* section);
 
 	bool BindPrimaryMeasure(ConfigParser& parser, const WCHAR* section, bool optional);
 	void BindSecondaryMeasures(ConfigParser& parser, const WCHAR* section);

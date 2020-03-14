@@ -996,6 +996,19 @@ void CommandHandler::DoEditSkinBang(std::vector<std::wstring>& args, Skin* skin)
 			LogErrorF(L"!EditSkin: Invalid parameters");
 		}
 	}
+	else if (argSize == 1)
+	{
+		std::wstring& config = args[0];
+		Skin* other = GetRainmeter().GetSkin(config);
+		if (other)
+		{
+			GetRainmeter().EditSkinFile(other->GetFolderPath(), other->GetFileName());
+		}
+		else
+		{
+			LogErrorF(skin, L"!EditSkin: Config \"%s\" not running", config.c_str());
+		}
+	}
 	else if (argSize == 0 && skin)
 	{
 		GetRainmeter().EditSkinFile(skin->GetFolderPath(), skin->GetFileName());

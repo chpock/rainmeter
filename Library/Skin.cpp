@@ -6,9 +6,6 @@
  * obtain one at <https://www.gnu.org/licenses/gpl-2.0.html>. */
 
 #include "StdAfx.h"
-
-#include <algorithm>
-
 #include "Skin.h"
 #include "Rainmeter.h"
 #include "TrayIcon.h"
@@ -26,9 +23,9 @@
 #include "MeterButton.h"
 #include "MeterString.h"
 #include "MeasureScript.h"
+#include "GeneralImage.h"
 #include "../Version.h"
 #include "../Common/PathUtil.h"
-#include "GeneralImage.h"
 #include "../Common/Gfx/Util/D2DEffectStream.h"
 
 #define SNAPDISTANCE 10
@@ -58,6 +55,7 @@ int Skin::c_InstanceCount = 0;
 bool Skin::c_IsInSelectionMode = false;
 
 Skin::Skin(const std::wstring& folderPath, const std::wstring& file) : m_FolderPath(folderPath), m_FileName(file),
+	m_IsFirstRun(false),
 	m_Canvas(),
 	m_Background(),
 	m_BackgroundSize(),
@@ -70,6 +68,8 @@ Skin::Skin(const std::wstring& folderPath, const std::wstring& file) : m_FolderP
 	m_DragMargins(),
 	m_WindowX(1, L'0'),
 	m_WindowY(1, L'0'),
+	m_AnchorX(1, L'0'),
+	m_AnchorY(1, L'0'),
 	m_WindowXScreen(1),
 	m_WindowYScreen(1),
 	m_WindowXScreenDefined(false),
@@ -136,7 +136,7 @@ Skin::Skin(const std::wstring& folderPath, const std::wstring& file) : m_FolderP
 	m_FontCollection(),
 	m_ToolTipHidden(false),
 	m_Favorite(false),
-	m_RecomputeZOrder(false)
+	m_ResetRelativeMeters(true)
 {
 	if (c_InstanceCount == 0)
 	{
@@ -242,8 +242,10 @@ void Skin::Dispose(bool refresh)
 ** Initializes the window, creates the class and the window.
 **
 */
-void Skin::Initialize()
+void Skin::Initialize(bool hasSettings)
 {
+	m_IsFirstRun = !hasSettings;
+
 	m_Window = CreateWindowEx(
 		WS_EX_TOOLWINDOW | WS_EX_LAYERED,
 		METERWINDOW_CLASS_NAME,
@@ -2057,13 +2059,35 @@ void Skin::ScreenToWindow()
 ** Reads the skin options from Rainmeter.ini
 **
 */
-void Skin::ReadOptions()
+void Skin::ReadOptions(ConfigParser& parser, LPCWSTR section, bool isDefault)
 {
+	const WCHAR* iniFile = GetRainmeter().GetIniFile().c_str();
+	const WCHAR* config = m_FolderPath.c_str();
+
 	WCHAR buffer[32];
 
-	const WCHAR* section = m_FolderPath.c_str();
-	ConfigParser parser;
-	parser.Initialize(GetRainmeter().GetIniFile(), nullptr, section);
+	auto makeKey = [&](LPCWSTR key) -> LPCWSTR
+	{
+		_snwprintf(buffer, _TRUNCATE, L"%s%s", isDefault ? L"Default" : L"", key);
+		return buffer;
+	};
+
+	auto writeDefaultString = [&](LPCWSTR key, LPCWSTR value)
+	{
+		if (parser.GetLastValueDefined())
+		{
+			WritePrivateProfileString(config, key, value, iniFile);
+		}
+	};
+
+	auto writeDefaultInt = [&](LPCWSTR key, int value)
+	{
+		if (parser.GetLastValueDefined())
+		{
+			_itow_s(value, buffer, 10);
+			WritePrivateProfileString(config, key, buffer, iniFile);
+		}
+	};
 
 	INT writeFlags = 0;
 	auto addWriteFlag = [&](INT flag)
@@ -2076,65 +2100,80 @@ void Skin::ReadOptions()
 
 	// Check if the window position should be read as a formula
 	double value;
-	m_WindowX = parser.ReadString(section, L"WindowX", L"0");
-	addWriteFlag(OPTION_POSITION);
+	m_WindowX = parser.ReadString(section, makeKey(L"WindowX"), L"0");
+	isDefault ? writeDefaultString(L"WindowX", m_WindowX.c_str()) : addWriteFlag(OPTION_POSITION);
 	if (parser.ParseFormula(m_WindowX, &value))
 	{
 		_itow_s((int)value, buffer, 10);
 		m_WindowX = buffer;
 	}
-	m_WindowY = parser.ReadString(section, L"WindowY", L"0");
-	addWriteFlag(OPTION_POSITION);
+
+	m_WindowY = parser.ReadString(section, makeKey(L"WindowY"), L"0");
+	isDefault ? writeDefaultString(L"WindowY", m_WindowY.c_str()) : addWriteFlag(OPTION_POSITION);
 	if (parser.ParseFormula(m_WindowY, &value))
 	{
 		_itow_s((int)value, buffer, 10);
 		m_WindowY = buffer;
 	}
 
-	m_AnchorX = parser.ReadString(section, L"AnchorX", L"0");
-	m_AnchorY = parser.ReadString(section, L"AnchorY", L"0");
+	m_AnchorX = parser.ReadString(section, makeKey(L"AnchorX"), L"0");
+	if (isDefault) writeDefaultString(L"AnchorX", m_AnchorX.c_str());
 
-	int zPos = parser.ReadInt(section, L"AlwaysOnTop", ZPOSITION_NORMAL);
-	addWriteFlag(OPTION_ALWAYSONTOP);
+	m_AnchorY = parser.ReadString(section, makeKey(L"AnchorY"), L"0");
+	if (isDefault) writeDefaultString(L"AnchorY", m_AnchorY.c_str());
+
+	int zPos = parser.ReadInt(section, makeKey(L"AlwaysOnTop"), ZPOSITION_NORMAL);
+	isDefault ? writeDefaultInt(L"AlwaysOnTop", zPos) : addWriteFlag(OPTION_ALWAYSONTOP);
 	m_WindowZPosition = (zPos >= ZPOSITION_ONDESKTOP && zPos <= ZPOSITION_ONTOPMOST) ? (ZPOSITION)zPos : ZPOSITION_NORMAL;
 
-	int hideMode = parser.ReadInt(section, L"HideOnMouseOver", HIDEMODE_NONE);
+	int hideMode = parser.ReadInt(section, makeKey(L"HideOnMouseOver"), HIDEMODE_NONE);
+	if (isDefault) writeDefaultInt(L"HideOnMouseOver", hideMode);
 	m_WindowHide = (hideMode >= HIDEMODE_NONE && hideMode <= HIDEMODE_FADEOUT) ? (HIDEMODE)hideMode : HIDEMODE_NONE;
 
-	m_WindowDraggable = parser.ReadBool(section, L"Draggable", true);
-	addWriteFlag(OPTION_DRAGGABLE);
+	m_WindowDraggable = parser.ReadBool(section, makeKey(L"Draggable"), true);
+	isDefault ? writeDefaultString(L"Draggable", m_WindowDraggable ? L"1" : L"0") : addWriteFlag(OPTION_DRAGGABLE);
 
-	m_SnapEdges = parser.ReadBool(section, L"SnapEdges", true);
-	addWriteFlag(OPTION_SNAPEDGES);
+	m_SnapEdges = parser.ReadBool(section, makeKey(L"SnapEdges"), true);
+	isDefault ? writeDefaultString(L"SnapEdges", m_SnapEdges ? L"1" : L"0") : addWriteFlag(OPTION_SNAPEDGES);
 
-	m_ClickThrough = parser.ReadBool(section, L"ClickThrough", false);
-	addWriteFlag(OPTION_CLICKTHROUGH);
+	m_ClickThrough = parser.ReadBool(section, makeKey(L"ClickThrough"), false);
+	isDefault ? writeDefaultString(L"ClickThrough", m_ClickThrough ? L"1" : L"0") : addWriteFlag(OPTION_CLICKTHROUGH);
 
-	m_KeepOnScreen = parser.ReadBool(section, L"KeepOnScreen", true);
-	addWriteFlag(OPTION_KEEPONSCREEN);
+	m_KeepOnScreen = parser.ReadBool(section, makeKey(L"KeepOnScreen"), true);
+	isDefault ? writeDefaultString(L"KeepOnScreen", m_KeepOnScreen ? L"1" : L"0") : addWriteFlag(OPTION_KEEPONSCREEN);
 
-	m_SavePosition = parser.ReadBool(section, L"SavePosition", true);
-	m_WindowStartHidden = parser.ReadBool(section, L"StartHidden", false);
-	m_AutoSelectScreen = parser.ReadBool(section, L"AutoSelectScreen", false);
+	m_SavePosition = parser.ReadBool(section, makeKey(L"SavePosition"), true);
+	if (isDefault) writeDefaultString(L"SavePosition", m_SavePosition ? L"1" : L"0");
 
-	m_AlphaValue = parser.ReadInt(section, L"AlphaValue", 255);
+	m_WindowStartHidden = parser.ReadBool(section, makeKey(L"StartHidden"), false);
+	if (isDefault) writeDefaultString(L"StartHidden", m_WindowStartHidden ? L"1" : L"0");
+
+	m_AutoSelectScreen = parser.ReadBool(section, makeKey(L"AutoSelectScreen"), false);
+	if (isDefault) writeDefaultString(L"AutoSelectScreen", m_AutoSelectScreen ? L"1" : L"0");
+
+	m_AlphaValue = parser.ReadInt(section, makeKey(L"AlphaValue"), 255);
 	m_AlphaValue = max(m_AlphaValue, 0);
 	m_AlphaValue = min(m_AlphaValue, 255);
+	if (isDefault) writeDefaultInt(L"AlphaValue", m_AlphaValue);
 
-	m_FadeDuration = parser.ReadInt(section, L"FadeDuration", 250);
+	m_FadeDuration = parser.ReadInt(section, makeKey(L"FadeDuration"), 250);
+	if (isDefault) writeDefaultInt(L"FadeDuration", m_FadeDuration);
 
-	m_SkinGroup = parser.ReadString(section, L"Group", L"");
-
-	const std::wstring dragGroup = parser.ReadString(section, L"DragGroup", L"");
-	m_DragGroup.InitializeGroup(dragGroup);
-
-	if (writeFlags != 0)
+	if (!isDefault)
 	{
-		WriteOptions(writeFlags);
-	}
+		m_SkinGroup = parser.ReadString(section, L"Group", L"");  // |DefaultGroup| not supported
 
-	// Set WindowXScreen/WindowYScreen temporarily
-	WindowToScreen();
+		const std::wstring dragGroup = parser.ReadString(section, L"DragGroup", L"");  // |DefaultDragGroup| not supported
+		m_DragGroup.InitializeGroup(dragGroup);
+
+		if (writeFlags != 0)
+		{
+			WriteOptions(writeFlags);
+		}
+
+		// Set WindowXScreen/WindowYScreen temporarily
+		WindowToScreen();
+	}
 }
 
 /*
@@ -2246,10 +2285,22 @@ bool Skin::ReadSkin()
 	std::wstring resourcePath = GetResourcesPath();
 	bool hasResourcesFolder = (_waccess(resourcePath.c_str(), 0) == 0);
 
-	// Read options from Rainmeter.ini.
-	ReadOptions();
-
 	m_Parser.Initialize(iniFile, this, nullptr, &resourcePath);
+
+	// Read any default settings from the skin (ie. DefaultWindowX, DefaultWindowY, etc.)
+	if (m_IsFirstRun)
+	{
+		ReadOptions(m_Parser, L"Rainmeter", true);
+		m_IsFirstRun = false;
+	}
+
+	// Read options from Rainmeter.ini
+	{
+		ConfigParser parser;
+		parser.Initialize(GetRainmeter().GetIniFile(), nullptr, m_FolderPath.c_str());
+
+		ReadOptions(parser, m_FolderPath.c_str(), false);
+	}
 
 	m_Canvas.SetAccurateText(m_Parser.ReadBool(L"Rainmeter", L"AccurateText", false));
 
@@ -2499,7 +2550,6 @@ bool Skin::ReadSkin()
 				if (meter)
 				{
 					m_Meters.push_back(meter);
-					meter->SetRelativeMeter(prevMeter);
 
 					if (meter->GetTypeID() == TypeID<MeterButton>())
 					{
@@ -2520,6 +2570,16 @@ bool Skin::ReadSkin()
 		GetRainmeter().ShowMessage(m_Window, text.c_str(), MB_OK | MB_ICONEXCLAMATION);
 		return false;
 	}
+
+	// Setup each meter's relative meter used for positioning. This is done before
+	// initialization since any "container" meter's may modify another meter's X/Y values.
+	// First read the container option, then set the appropriate relative meter.
+	for (Meter* meter : m_Meters)
+	{
+		meter->ReadContainerOptions(m_Parser);
+	}
+	m_ResetRelativeMeters = true;
+	UpdateRelativeMeters();
 
 	// Read measure options. This is done before the meters to ensure that e.g. Substitute is used
 	// when the meters get the value of the measure. The measures cannot be initialized yet as som
@@ -2665,7 +2725,7 @@ void Skin::CreateDoubleBuffer(int cx, int cy)
 */
 void Skin::Redraw()
 {
-	DoRecomputeZOrder();
+	//UpdateRelativeMeters();
 
 	if (m_ResizeWindow)
 	{
@@ -2815,22 +2875,22 @@ void Skin::Redraw()
 		}
 
 		// Draw the meters
-		for (auto j : m_Meters)
+		for (auto meter : m_Meters)
 		{
-			if(HandleContainer(j)) continue;	
+			if (HandleContainer(meter)) continue;
 
-			const D2D1_MATRIX_3X2_F matrix = j->GetTransformationMatrix();
+			const D2D1_MATRIX_3X2_F matrix = meter->GetTransformationMatrix();
 			const D2D1::Matrix3x2F* reinterpretMatrix = D2D1::Matrix3x2F::ReinterpretBaseType(&matrix);
 
 			if (!reinterpretMatrix->IsIdentity())
 			{
 				m_Canvas.SetTransform(matrix);
-				j->Draw(m_Canvas);
+				meter->Draw(m_Canvas);
 				m_Canvas.ResetTransform();
 			}
 			else
 			{
-				j->Draw(m_Canvas);
+				meter->Draw(m_Canvas);
 			}
 		}
 
@@ -2846,88 +2906,102 @@ void Skin::Redraw()
 	m_Canvas.EndDraw();
 }
 
-bool Skin::HandleContainer(Meter* container) {
-	if(container->IsContained()) return true;
-	if (container->GetContainerItems().empty()) return false;
+bool Skin::HandleContainer(Meter* container)
+{
+	if (container->IsContained()) return true;
+
+	auto& containerItems = container->GetContainerItems();
+	if (containerItems.empty()) return false;
+
+	if (container->GetW() <= 0 || container->GetH() <= 0) return true;
 
 	auto containerContentBitmap = container->GetContainerContentTexture();
 	m_Canvas.SetTarget(containerContentBitmap);
 	m_Canvas.Clear();
 
-	
-	Meter* relative = container;
-
 	const D2D1_MATRIX_3X2_F offset = D2D1::Matrix3x2F::Translation((FLOAT)-container->GetX(), (FLOAT)-container->GetY());
 
-	for(auto it : container->GetContainerItems())
+	for (auto item : containerItems)
 	{
-		const D2D1_MATRIX_3X2_F cMatrix = it->GetTransformationMatrix() * offset;
-		m_Canvas.SetTransform(cMatrix);
-		it->Draw(m_Canvas);
+		m_Canvas.SetTransform(item->GetTransformationMatrix() * offset);
+		item->Draw(m_Canvas);
 		m_Canvas.ResetTransform();
-		relative = it;
-		it++;
 	}
-
-	const D2D1_MATRIX_3X2_F matrix = container->GetTransformationMatrix() * offset;
 
 	auto containerBitmap = container->GetContainerTexture();
 	m_Canvas.SetTarget(containerBitmap);
 	m_Canvas.Clear();
-	m_Canvas.SetTransform(matrix);
+	m_Canvas.SetTransform(container->GetTransformationMatrix() * offset);
 	container->Draw(m_Canvas);
+
 	m_Canvas.ResetTransform();
 	m_Canvas.ResetTarget();
 
 	const auto meterRect = container->GetMeterRect();
 	const auto containerContentD2DBitmap = containerContentBitmap->GetBitmap();
 	const auto containerD2DBitmap = containerBitmap->GetBitmap();
-	const D2D1_RECT_F srcRect = {0.0, 0.0, (FLOAT)containerContentD2DBitmap->GetWidth(), (FLOAT)containerContentD2DBitmap->GetHeight()};
-	const D2D1_RECT_F srcRect2 = {0.0, 0.0, (FLOAT)containerD2DBitmap->GetWidth(), (FLOAT)containerD2DBitmap->GetHeight()};
-	const D2D1_RECT_F destination = {(FLOAT)meterRect.left, (FLOAT)meterRect.top, (FLOAT)meterRect.right, (FLOAT)meterRect.bottom };
-	
+
+	const D2D1_RECT_F srcRect = D2D1::RectF(
+		0.0f,
+		0.0f,
+		(FLOAT)containerContentD2DBitmap->GetWidth(),
+		(FLOAT)containerContentD2DBitmap->GetHeight());
+
+	const D2D1_RECT_F srcRect2 = D2D1::RectF(
+		0.0f,
+		0.0f,
+		(FLOAT)containerD2DBitmap->GetWidth(),
+		(FLOAT)containerD2DBitmap->GetHeight());
+
+	const D2D1_RECT_F destination = D2D1::RectF(
+		(FLOAT)meterRect.left,
+		(FLOAT)meterRect.top,
+		(FLOAT)meterRect.right,
+		(FLOAT)meterRect.bottom);
+
 	m_Canvas.DrawMaskedBitmap(containerContentD2DBitmap, containerD2DBitmap, destination, srcRect2, srcRect);
-	return true; 
+	return true;
 }
 
-void Skin::DoRecomputeZOrder() {
-	if (!m_RecomputeZOrder) return;
+void Skin::UpdateRelativeMeters()
+{
+	if (!m_ResetRelativeMeters) return;
 
-	std::map<Meter*, Meter*> containerLookup;
-	std::vector<Meter*> containedMeters;
-	Meter* prevMeter = nullptr;
-	for (auto meter : m_Meters) {
+	std::unordered_map<Meter*, Meter*> containers;
+	Meter* previousMeter = nullptr;
 
-		if (meter->IsContained()) {
-			containedMeters.push_back(meter);
+	for (auto* meter : m_Meters)
+	{
+		if (meter->IsContained())
+		{
+			// Contained meters can only be relative to other meters contained
+			// in the same container, or to the container itself.
+			Meter* container = meter->GetContainerMeter();
+			auto item = containers.find(container);
+			if (item != containers.end())
+			{
+				meter->SetRelativeMeter(item->second);
+			}
+			else
+			{
+				meter->SetRelativeMeter(container);
+			}
+
+			containers[container] = meter;
 			continue;
 		}
 
-		if (prevMeter) {
-			if (meter->IsContainer()) {
-				containerLookup[meter] = meter;
-			}
-			meter->SetRelativeMeter(prevMeter);
+		if (meter->IsContainer())
+		{
+			// Container meters can only be relative to other non-contained meters
+			containers[meter] = meter;
 		}
 
-		prevMeter = meter;
+		meter->SetRelativeMeter(previousMeter);
+		previousMeter = meter;
 	}
 
-	for (auto meter : containedMeters) {
-		auto container = meter->GetContainerMeter();
-
-		auto it = containerLookup.find(container);
-		if (it != containerLookup.end()) {
-			meter->SetRelativeMeter(it->second);
-			containerLookup[container] = meter;
-		}
-	}
-	m_RecomputeZOrder = false;
-}
-
-void Skin::RecomputeZOrder()
-{
-	m_RecomputeZOrder = true;
+	m_ResetRelativeMeters = false;
 }
 
 /*
@@ -3011,6 +3085,8 @@ bool Skin::UpdateMeter(Meter* meter, bool& bActiveTransition, bool force)
 		meter->UpdateToolTip();
 	}
 
+	meter->UpdateContainer();
+
 	// Check for transitions
 	if (!bActiveTransition && meter->HasActiveTransition())
 	{
@@ -3051,8 +3127,6 @@ void Skin::Update(bool refresh)
 
 	DialogAbout::UpdateMeasures(this);
 
-	DoRecomputeZOrder();
-
 	// Update all meters
 	bool bActiveTransition = false;
 	bool bUpdate = false;
@@ -3065,9 +3139,9 @@ void Skin::Update(bool refresh)
 
 			(*j)->DoUpdateAction();
 		}
-
-		(*j)->UpdateContainer();
 	}
+
+	UpdateRelativeMeters();
 
 	// Redraw all meters
 	if (bUpdate || m_ResizeWindow || refresh)

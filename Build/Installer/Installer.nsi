@@ -35,7 +35,7 @@ VIAddVersionKey "FileDescription" "Rainmeter Installer"
 VIAddVersionKey "FileVersion" "${VERSION_FULL}"
 VIAddVersionKey "ProductVersion" "${VERSION_FULL}"
 VIAddVersionKey "OriginalFilename" "${OUTFILE}"
-VIAddVersionKey "LegalCopyright" "© 2017 Rainmeter Team"
+VIAddVersionKey "LegalCopyright" "© 2019 Rainmeter Team"
 VIProductVersion "${VERSION_FULL}"
 BrandingText " "
 SetCompressor /SOLID lzma
@@ -99,7 +99,7 @@ Function .onInit
 		${If} ${IsWin7}
 		${OrIf} ${IsWin2008R2}
 			${IfNot} ${AtLeastServicePack} 1
-				MessageBox MB_OK|MB_ICONSTOP "Rainmeter ${VERSION_SHORT} requires at least Windows 7 with Service Pack 1.$\n$\nPlease install Service Pack 1 or download Rainmeter 3.3 from www.rainmeter.net"
+				MessageBox MB_OK|MB_ICONSTOP "Rainmeter ${VERSION_SHORT} requires at least Windows 7 with Service Pack 1."
 				Quit
 			${EndIf}
 
@@ -112,13 +112,13 @@ Function .onInit
 				p 0, \
 				*p .r0) i.r1"
 			${If} $1 <> 0
-				MessageBox MB_OK|MB_ICONSTOP "Rainmeter ${VERSION_SHORT} requires at least Windows 7 with the Platform Update installed.$\n$\nPlease install the Windows 7 Platform Update or download Rainmeter 3.3 from www.rainmeter.net"
+				MessageBox MB_OK|MB_ICONSTOP "Rainmeter ${VERSION_SHORT} requires at least Windows 7 with the Platform Update installed."
 				Quit
 			${Endif}
 			; Call Release
 			System::Call "$0->2()"
 		${ElseIfNot} ${AtLeastWin8}
-			MessageBox MB_OK|MB_ICONSTOP "Rainmeter ${VERSION_SHORT} requires at least Windows 7 with Service Pack 1.$\n$\nFor XP and Vista, you can download Rainmeter 3.3 from www.rainmeter.net"
+			MessageBox MB_OK|MB_ICONSTOP "Rainmeter ${VERSION_SHORT} requires at least Windows 7 with Service Pack 1."
 			Quit
 		${EndIf}
 
@@ -672,6 +672,12 @@ SkipIniMove:
 			${Else}
 				!insertmacro UAC_AsUser_Call Function CreateUserStartupShortcut ${UAC_SYNCREGISTERS}
 			${EndIf}
+		${Else}
+			SetShellVarContext current
+			${If} ${FileExists} "$SMSTARTUP\Rainmeter.lnk"
+				; Remove startup shortcut if it exists
+				!insertmacro UAC_AsUser_Call Function RemoveUserStartupShortcut ${UAC_SYNCREGISTERS}
+			${EndIF}
 		${EndIf}
 
 		SetShellVarContext current

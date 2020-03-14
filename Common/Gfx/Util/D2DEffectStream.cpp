@@ -112,7 +112,7 @@ void D2DEffectStream::ApplyExifOrientation(const Canvas& canvas)
 	}
 }
 
-D2DBitmap* D2DEffectStream::ToBitmap(Canvas& canvas)
+D2DBitmap* D2DEffectStream::ToBitmap(Canvas& canvas, const D2D1_SIZE_F* imageSize)
 {
 	bool changed = false;
 	for (const auto& effect : m_Effects)
@@ -130,13 +130,16 @@ D2DBitmap* D2DEffectStream::ToBitmap(Canvas& canvas)
 	D2D1_MATRIX_3X2_F transform = D2D1::Matrix3x2F::Identity();
 	canvas.m_Target->GetTransform(&transform);
 
-	const auto maxBitmapSize = canvas.m_MaxBitmapSize;
-	const auto size = GetSize(canvas);
+	const UINT maxBitmapSize = (UINT)canvas.m_MaxBitmapSize;
+	const auto size = (imageSize) ? *imageSize : GetSize(canvas);
 	if (size.width < 0.0f || size.height < 0.0f) return nullptr;
 
+	const UINT width = (UINT)size.width;
+	const UINT height = (UINT)size.height;
+
 	D2DBitmap* d2dbitmap = new D2DBitmap(m_BaseImage->m_Path, m_BaseImage->m_ExifOrientation);
-	d2dbitmap->m_Width = (UINT)size.width;
-	d2dbitmap->m_Height = (UINT)size.height;
+	d2dbitmap->m_Width = width;
+	d2dbitmap->m_Height = height;
 
 	auto deleteImage = [&d2dbitmap]() -> void
 	{
@@ -145,23 +148,24 @@ D2DBitmap* D2DEffectStream::ToBitmap(Canvas& canvas)
 	};
 
 	auto didDraw = canvas.IsDrawing();
-
-	if (didDraw) {
+	if (didDraw)
+	{
 		canvas.m_Target->Flush();
 	}
-	else {
+	else
+	{
 		canvas.BeginDraw();
 	}
 
-	for (UINT y = 0U, H = (UINT)floor(size.height / maxBitmapSize); y <= H; ++y)
+	for (UINT y = 0U, H = height / maxBitmapSize; y <= H; ++y)
 	{
-		for (UINT x = 0U, W = (UINT)floor(size.width / maxBitmapSize); x <= W; ++x)
+		for (UINT x = 0U, W = width / maxBitmapSize; x <= W; ++x)
 		{
 			D2D1_RECT_U rect = D2D1::RectU(
 				(x * maxBitmapSize),
 				(y * maxBitmapSize),
-				(x == W ? ((UINT)size.width - maxBitmapSize * x) : maxBitmapSize),		// If last x coordinate, find cutoff
-				(y == H ? ((UINT)size.height - maxBitmapSize * y) : maxBitmapSize));	// If last y coordinate, find cutoff
+				(x == W ? (width - maxBitmapSize * x) : maxBitmapSize),		// If last x coordinate, find cutoff
+				(y == H ? (height - maxBitmapSize * y) : maxBitmapSize));	// If last y coordinate, find cutoff
 
 			Microsoft::WRL::ComPtr<ID2D1Bitmap1> bitmap;
 			HRESULT hr = canvas.m_Target->CreateBitmap(
@@ -217,10 +221,12 @@ D2DBitmap* D2DEffectStream::ToBitmap(Canvas& canvas)
 		}
 	}
 
-	if (didDraw) {
+	if (didDraw)
+	{
 		canvas.m_Target->Flush();
 	}
-	else {
+	else
+	{
 		canvas.EndDraw();
 	}
 
@@ -237,6 +243,8 @@ D2D1_SIZE_F D2DEffectStream::GetSize(const Canvas& canvas)
 	for (size_t i = 0; i < m_Effects.size(); ++i)
 	{
 		const auto& effect = m_Effects[i];
+		if (!effect) return size;
+
 		auto& segment = m_BaseImage->m_Segments[i];
 
 		Microsoft::WRL::ComPtr<ID2D1Image> image;
@@ -244,7 +252,7 @@ D2D1_SIZE_F D2DEffectStream::GetSize(const Canvas& canvas)
 
 		D2D1_RECT_F rect = D2D1::RectF(0.0f, 0.0f, 0.0f, 0.0f);
 		HRESULT hr = canvas.m_Target->GetImageLocalBounds(image.Get(), &rect);
-		if (FAILED(hr)) return D2D1::SizeF(0.0f, 0.0f);
+		if (FAILED(hr)) return size;
 
 		if (i == 0)
 		{
